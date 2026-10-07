@@ -10,6 +10,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 // Student Portal Pages
 import DashboardPage from './pages/student/DashboardPage';
 import DrivesPage from './pages/student/DrivesPage';
+import DriveDetailsPage from './pages/student/DriveDetailsPage';
 import ApplicationsPage from './pages/student/ApplicationsPage';
 import ProfilePage from './pages/student/ProfilePage';
 import NotificationsPage from './pages/student/NotificationsPage';
@@ -29,6 +30,7 @@ function App() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="drives" element={<DrivesPage />} />
+              <Route path="drives/:id" element={<DriveDetailsPage />} />
               <Route path="applications" element={<ApplicationsPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="notifications" element={<NotificationsPage />} />
