@@ -5,6 +5,7 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const studentProfileRoutes = require('./routes/studentProfileRoutes');
 const placementDriveRoutes = require('./routes/placementDriveRoutes');
+const applicationRoutes = require('./routes/applicationRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // Load environment variables
@@ -36,6 +37,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/student/profile', studentProfileRoutes);
 app.use('/api/student/drives', placementDriveRoutes);
+app.use('/api/student/applications', applicationRoutes);
 
 // Error Handling Middleware
 app.use(notFound);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { driveService } from '../../services/driveService';
+import { applicationService } from '../../services/applicationService';
 import { 
   Briefcase, Building2, Calendar, Clock, MapPin, 
   CheckCircle2, XCircle, ArrowLeft, Loader2, Info, ChevronRight, GraduationCap
@@ -12,6 +13,8 @@ const DriveDetailsPage = () => {
   const [drive, setDrive] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [applying, setApplying] = useState(false);
+  const [applyMessage, setApplyMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     fetchDriveDetails();
@@ -30,6 +33,26 @@ const DriveDetailsPage = () => {
       setError(err.response?.data?.message || 'Failed to load drive details.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApply = async () => {
+    try {
+      setApplying(true);
+      setApplyMessage({ type: '', text: '' });
+      const res = await applicationService.applyForDrive(id);
+      if (res.success) {
+        setApplyMessage({ type: 'success', text: 'Application submitted successfully!' });
+        // Update local state to reflect the application
+        setDrive(prev => ({ ...prev, hasApplied: true }));
+      }
+    } catch (err) {
+      setApplyMessage({ 
+        type: 'error', 
+        text: err.response?.data?.message || 'Failed to apply for the drive.' 
+      });
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -156,19 +179,40 @@ const DriveDetailsPage = () => {
               ))}
             </ul>
 
-            {/* Application Button (Placeholder for Phase 6) */}
-            <button 
-              disabled={!isEligible}
-              className={`w-full py-3 px-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition shadow-sm ${
-                isEligible 
-                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20' 
-                  : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-              }`}
-            >
-              <Briefcase className="w-5 h-5" />
-              <span>{isEligible ? 'Apply Now' : 'Cannot Apply'}</span>
-            </button>
-            {!isEligible && (
+            {/* Application Feedback Messages */}
+            {applyMessage.text && (
+              <div className={`mt-4 mb-2 p-3 text-sm rounded-lg flex items-start gap-2 ${
+                applyMessage.type === 'success' 
+                  ? 'bg-emerald-100 text-emerald-800' 
+                  : 'bg-rose-100 text-rose-800'
+              }`}>
+                {applyMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <XCircle className="w-5 h-5 shrink-0" />}
+                <span>{applyMessage.text}</span>
+              </div>
+            )}
+
+            {/* Application Button */}
+            {drive.hasApplied ? (
+              <div className="w-full py-3 px-4 rounded-xl font-semibold flex items-center justify-center gap-2 bg-emerald-100 text-emerald-700 mt-2">
+                <CheckCircle2 className="w-5 h-5" />
+                <span>Successfully Applied</span>
+              </div>
+            ) : (
+              <button 
+                onClick={handleApply}
+                disabled={!isEligible || applying}
+                className={`w-full py-3 px-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition shadow-sm mt-2 ${
+                  isEligible 
+                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20' 
+                    : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {applying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Briefcase className="w-5 h-5" />}
+                <span>{applying ? 'Submitting Application...' : isEligible ? 'Apply Now' : 'Cannot Apply'}</span>
+              </button>
+            )}
+            
+            {!isEligible && !drive.hasApplied && (
               <p className="text-xs text-center text-slate-500 mt-3">
                 Update your <Link to="/profile" className="text-indigo-600 hover:underline">Student Profile</Link> if you believe this is incorrect.
               </p>
