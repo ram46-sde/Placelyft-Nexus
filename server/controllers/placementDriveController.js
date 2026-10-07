@@ -10,8 +10,11 @@ const getAvailableDrives = async (req, res, next) => {
   try {
     const studentProfile = await StudentProfile.findOne({ user: req.user._id });
 
-    // Fetch active drives and populate company details
-    const drives = await PlacementDrive.find({ isActive: true })
+    // Fetch active drives scoped to the student's college and populate company details
+    const drives = await PlacementDrive.find({ 
+      isActive: true,
+      collegeId: req.user.collegeId 
+    })
       .populate('company', 'name logoUrl industry')
       .sort({ driveDate: 1 });
 
@@ -52,6 +55,14 @@ const getDriveById = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Placement drive not found.',
+      });
+    }
+
+    // Verify data isolation: Student can only view drives belonging to their college
+    if (drive.collegeId && req.user.collegeId && drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized access to this placement drive.',
       });
     }
 

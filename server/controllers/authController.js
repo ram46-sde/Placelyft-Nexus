@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const College = require('../models/College');
 const generateToken = require('../utils/generateToken');
 
 // @desc    Register a new student
@@ -32,12 +33,25 @@ const registerStudent = async (req, res, next) => {
       });
     }
 
-    // Create user with explicit 'student' role
+    // Controlled Approach: Default Single-College Assignment
+    // To preserve the existing registration flow without exposing a public college selector,
+    // we assign the student to the primary active college. 
+    // Once multi-college is fully active, this will be replaced by an invitation-code system.
+    const defaultCollege = await College.findOne({ isActive: true });
+    if (!defaultCollege) {
+      return res.status(500).json({
+        success: false,
+        message: 'System configuration error: No active college found to associate with this account.',
+      });
+    }
+
+    // Create user with explicit 'student' role and collegeId
     const user = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
       role: 'student',
+      collegeId: defaultCollege._id,
     });
 
     // Generate JWT token

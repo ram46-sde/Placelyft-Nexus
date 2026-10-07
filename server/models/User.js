@@ -27,8 +27,17 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['student', 'officer', 'recruiter'],
+      enum: ['student', 'placement_officer', 'recruiter', 'super_admin'],
       default: 'student',
+    },
+    collegeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'College',
+      // Enforced by business logic instead of strict DB validation to preserve backward compatibility for existing records
+    },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
     },
     isActive: {
       type: Boolean,

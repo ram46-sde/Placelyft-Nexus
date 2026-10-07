@@ -16,6 +16,10 @@ const applyForDrive = async (req, res, next) => {
     if (!drive) {
       return res.status(404).json({ success: false, message: 'Placement drive not found.' });
     }
+
+    if (drive.collegeId && req.user.collegeId && drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this placement drive.' });
+    }
     if (!drive.isActive) {
       return res.status(400).json({ success: false, message: 'This placement drive is no longer active.' });
     }

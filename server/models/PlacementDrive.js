@@ -7,6 +7,11 @@ const placementDriveSchema = new mongoose.Schema(
       ref: 'Company',
       required: true,
     },
+    collegeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'College',
+      // Enforced by business logic for backward compatibility
+    },
     jobRole: {
       type: String,
       required: true,
