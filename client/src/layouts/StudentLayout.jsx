@@ -20,15 +20,15 @@ const StudentLayout = () => {
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/');
   };
 
   const navItems = [
-    { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { label: 'Placement Drives', path: '/drives', icon: Briefcase },
-    { label: 'My Applications', path: '/applications', icon: FileCheck2 },
-    { label: 'Profile', path: '/profile', icon: User },
-    { label: 'Notifications', path: '/notifications', icon: Bell },
+    { label: 'Dashboard', path: '/student/dashboard', icon: LayoutDashboard },
+    { label: 'Placement Drives', path: '/student/drives', icon: Briefcase },
+    { label: 'My Applications', path: '/student/applications', icon: FileCheck2 },
+    { label: 'Profile', path: '/student/profile', icon: User },
+    { label: 'Notifications', path: '/student/notifications', icon: Bell },
   ];
 
   return (

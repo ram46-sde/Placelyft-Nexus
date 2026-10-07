@@ -27,7 +27,7 @@ const LoginPage = () => {
     setSubmitting(false);
 
     if (result.success) {
-      navigate('/dashboard');
+      navigate('/student/dashboard');
     } else {
       setFormError(result.message || 'Invalid credentials.');
     }
@@ -128,7 +128,7 @@ const LoginPage = () => {
           <div className="mt-6 pt-5 border-t border-slate-800 text-center">
             <p className="text-sm text-slate-400">
               New student?{' '}
-              <Link to="/register" className="text-indigo-400 hover:text-indigo-300 font-medium transition">
+              <Link to="/student/register" className="text-indigo-400 hover:text-indigo-300 font-medium transition">
                 Create an account
               </Link>
             </p>

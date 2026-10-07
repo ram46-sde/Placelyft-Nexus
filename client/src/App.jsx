@@ -3,9 +3,14 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import StudentLayout from './layouts/StudentLayout';
 
+// Common Pages
+import LandingPage from './pages/LandingPage';
+
 // Auth Pages
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
+import OfficerLoginPage from './pages/auth/OfficerLoginPage';
+import RecruiterLoginPage from './pages/auth/RecruiterLoginPage';
 
 // Student Portal Pages
 import DashboardPage from './pages/student/DashboardPage';
@@ -20,14 +25,23 @@ function App() {
     <Router>
       <AuthProvider>
         <Routes>
-          {/* Public Auth Routes */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          {/* Common Landing Page */}
+          <Route path="/" element={<LandingPage />} />
+
+          {/* Student Auth Routes */}
+          <Route path="/student/login" element={<LoginPage />} />
+          <Route path="/student/register" element={<RegisterPage />} />
+
+          {/* Placement Officer Auth Route (Placeholder) */}
+          <Route path="/placement-officer/login" element={<OfficerLoginPage />} />
+
+          {/* Recruiter Auth Route (Placeholder) */}
+          <Route path="/recruiter/login" element={<RecruiterLoginPage />} />
 
           {/* Protected Student Portal Routes */}
-          <Route element={<ProtectedRoute allowedRoles={['student']} />}>
-            <Route path="/" element={<StudentLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="/student" element={<ProtectedRoute allowedRoles={['student']} loginPath="/student/login" />}>
+            <Route element={<StudentLayout />}>
+              <Route index element={<Navigate to="/student/dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="drives" element={<DrivesPage />} />
               <Route path="drives/:id" element={<DriveDetailsPage />} />
@@ -38,7 +52,7 @@ function App() {
           </Route>
 
           {/* Catch-all Fallback */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </Router>

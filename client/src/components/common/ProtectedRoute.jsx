@@ -2,7 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
-const ProtectedRoute = ({ allowedRoles = ['student'] }) => {
+const ProtectedRoute = ({ allowedRoles = ['student'], loginPath = '/student/login' }) => {
   const { user, isAuthenticated, loading } = useAuth();
 
   if (loading) {
@@ -17,7 +17,7 @@ const ProtectedRoute = ({ allowedRoles = ['student'] }) => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginPath} replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(user?.role)) {
@@ -32,7 +32,7 @@ const ProtectedRoute = ({ allowedRoles = ['student'] }) => {
             Your account role (<span className="font-semibold">{user?.role}</span>) is not authorized to access the Student Portal.
           </p>
           <a
-            href="/login"
+            href={loginPath}
             className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
           >
             Back to Login

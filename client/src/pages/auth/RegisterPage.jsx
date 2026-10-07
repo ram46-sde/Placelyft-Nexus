@@ -50,7 +50,7 @@ const RegisterPage = () => {
     setSubmitting(false);
 
     if (result.success) {
-      navigate('/dashboard');
+      navigate('/student/dashboard');
     } else {
       setFormError(result.message || 'Registration failed. Please try again.');
     }
@@ -191,7 +191,7 @@ const RegisterPage = () => {
           <div className="mt-6 pt-5 border-t border-slate-800 text-center">
             <p className="text-sm text-slate-400">
               Already have an account?{' '}
-              <Link to="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition">
+              <Link to="/student/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition">
                 Sign In
               </Link>
             </p>
