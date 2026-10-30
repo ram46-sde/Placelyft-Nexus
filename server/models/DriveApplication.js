@@ -12,6 +12,11 @@ const driveApplicationSchema = new mongoose.Schema(
       ref: 'PlacementDrive',
       required: true,
     },
+    // Additive tenant isolation field (Milestone 2)
+    collegeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'College',
+    },
     status: {
       type: String,
       enum: ['Applied', 'Shortlisted', 'Interviewing', 'Selected', 'Rejected'],

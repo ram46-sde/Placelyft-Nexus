@@ -1,13 +1,20 @@
 const PlacementDrive = require('../models/PlacementDrive');
 const StudentProfile = require('../models/StudentProfile');
 const DriveApplication = require('../models/DriveApplication');
-const { checkEligibility } = require('../utils/eligibilityEngine');
+const { checkEligibility, resolveUgBasis } = require('../utils/eligibilityEngine');
 
 // @desc    Get all active placement drives with eligibility status
 // @route   GET /api/student/drives
 // @access  Private (Student)
 const getAvailableDrives = async (req, res, next) => {
   try {
+    if (!req.user.collegeId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Student account is not associated with an institution.',
+      });
+    }
+
     const studentProfile = await StudentProfile.findOne({ user: req.user._id });
 
     // Fetch active drives scoped to the student's college and populate company details
@@ -26,9 +33,16 @@ const getAvailableDrives = async (req, res, next) => {
     const drivesWithEligibility = drives.map((drive) => {
       const eligibility = checkEligibility(studentProfile, drive.eligibilityCriteria);
       const hasApplied = appliedDriveIds.includes(drive._id.toString());
+      const driveObj = drive.toObject();
+      const effectiveUgCriteriaType = resolveUgBasis(drive.eligibilityCriteria);
       
       return {
-        ...drive.toObject(),
+        ...driveObj,
+        effectiveUgCriteriaType,
+        eligibilityCriteria: {
+          ...driveObj.eligibilityCriteria,
+          effectiveUgCriteriaType,
+        },
         eligibility,
         hasApplied,
       };
@@ -58,8 +72,13 @@ const getDriveById = async (req, res, next) => {
       });
     }
 
-    // Verify data isolation: Student can only view drives belonging to their college
-    if (drive.collegeId && req.user.collegeId && drive.collegeId.toString() !== req.user.collegeId.toString()) {
+    // Verify multi-tenant data isolation:
+    // Both the drive and the user MUST have a valid collegeId, and they must match.
+    if (
+      !drive.collegeId ||
+      !req.user.collegeId ||
+      drive.collegeId.toString() !== req.user.collegeId.toString()
+    ) {
       return res.status(403).json({
         success: false,
         message: 'Unauthorized access to this placement drive.',
@@ -74,10 +93,18 @@ const getDriveById = async (req, res, next) => {
       placementDrive: drive._id 
     });
 
+    const effectiveUgCriteriaType = resolveUgBasis(drive.eligibilityCriteria);
+    const driveObj = drive.toObject();
+
     res.status(200).json({
       success: true,
       drive: {
-        ...drive.toObject(),
+        ...driveObj,
+        effectiveUgCriteriaType,
+        eligibilityCriteria: {
+          ...driveObj.eligibilityCriteria,
+          effectiveUgCriteriaType,
+        },
         eligibility,
         hasApplied: !!existingApplication,
       },

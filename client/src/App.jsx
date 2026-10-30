@@ -12,6 +12,9 @@ import RegisterPage from './pages/auth/RegisterPage';
 import OfficerLoginPage from './pages/auth/OfficerLoginPage';
 import RecruiterLoginPage from './pages/auth/RecruiterLoginPage';
 
+// Placement Officer Portal Pages
+import OfficerDashboardPage from './pages/officer/OfficerDashboardPage';
+
 // Student Portal Pages
 import DashboardPage from './pages/student/DashboardPage';
 import DrivesPage from './pages/student/DrivesPage';
@@ -32,11 +35,19 @@ function App() {
           <Route path="/student/login" element={<LoginPage />} />
           <Route path="/student/register" element={<RegisterPage />} />
 
-          {/* Placement Officer Auth Route (Placeholder) */}
+          {/* Placement Officer Auth Routes */}
           <Route path="/placement-officer/login" element={<OfficerLoginPage />} />
+          <Route path="/officer/login" element={<Navigate to="/placement-officer/login" replace />} />
 
           {/* Recruiter Auth Route (Placeholder) */}
           <Route path="/recruiter/login" element={<RecruiterLoginPage />} />
+
+          {/* Protected Placement Officer Portal Routes */}
+          <Route path="/officer" element={<ProtectedRoute allowedRoles={['placement_officer']} loginPath="/placement-officer/login" />}>
+            <Route index element={<Navigate to="/officer/dashboard" replace />} />
+            <Route path="dashboard" element={<OfficerDashboardPage />} />
+          </Route>
+          <Route path="/placement-officer/dashboard" element={<Navigate to="/officer/dashboard" replace />} />
 
           {/* Protected Student Portal Routes */}
           <Route path="/student" element={<ProtectedRoute allowedRoles={['student']} loginPath="/student/login" />}>

@@ -1,49 +1,25 @@
-const express = require('express');
-const cors = require('cors');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
-const authRoutes = require('./routes/authRoutes');
-const studentProfileRoutes = require('./routes/studentProfileRoutes');
-const placementDriveRoutes = require('./routes/placementDriveRoutes');
-const applicationRoutes = require('./routes/applicationRoutes');
-const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+const { getJwtSecret } = require('./config/jwt');
 
 // Load environment variables
 dotenv.config();
 
+// Validate critical security environment variables on startup
+try {
+  getJwtSecret();
+} catch (error) {
+  console.error(`[Security Configuration Error]: ${error.message}`);
+  process.exit(1);
+}
+
 // Connect to MongoDB
 connectDB();
 
-const app = express();
-
-// Middleware
-app.use(cors({
-  origin: '*', // Allow frontend development requests
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-app.use(express.json());
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'College Placement Management Platform API is running smoothly.',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Mount Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/student/profile', studentProfileRoutes);
-app.use('/api/student/drives', placementDriveRoutes);
-app.use('/api/student/applications', applicationRoutes);
-
-// Error Handling Middleware
-app.use(notFound);
-app.use(errorHandler);
+const app = require('./app');
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`[Server]: CPMS Backend is running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
 });
+

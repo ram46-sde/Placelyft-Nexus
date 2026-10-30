@@ -3,8 +3,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { driveService } from '../../services/driveService';
 import { applicationService } from '../../services/applicationService';
 import { 
-  Briefcase, Building2, Calendar, Clock, MapPin, 
-  CheckCircle2, XCircle, ArrowLeft, Loader2, Info, ChevronRight, GraduationCap
+  Briefcase, Building2, Calendar, Clock, 
+  CheckCircle2, XCircle, ArrowLeft, Loader2, Info
 } from 'lucide-react';
 
 const DriveDetailsPage = () => {
@@ -77,7 +77,7 @@ const DriveDetailsPage = () => {
         </div>
         <h2 className="text-xl font-bold text-slate-800">Error Loading Drive</h2>
         <p className="text-slate-500 mt-2">{error || 'Drive not found'}</p>
-        <button onClick={() => navigate('/drives')} className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition">
+        <button onClick={() => navigate('/student/drives')} className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition">
           <ArrowLeft className="w-4 h-4" /> Back to Drives
         </button>
       </div>
@@ -87,10 +87,16 @@ const DriveDetailsPage = () => {
   const { eligibility, company, eligibilityCriteria } = drive;
   const isEligible = eligibility?.isEligible;
 
+  const ugBasis =
+    drive.effectiveUgCriteriaType ||
+    eligibilityCriteria?.effectiveUgCriteriaType ||
+    eligibilityCriteria?.ugCriteriaType ||
+    (Number(eligibilityCriteria?.minCgpa) > 0 ? 'CGPA' : 'NONE');
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12">
       {/* Back Navigation */}
-      <Link to="/drives" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-indigo-600 transition">
+      <Link to="/student/drives" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-indigo-600 transition">
         <ArrowLeft className="w-4 h-4" /> Back to all drives
       </Link>
 
@@ -214,7 +220,7 @@ const DriveDetailsPage = () => {
             
             {!isEligible && !drive.hasApplied && (
               <p className="text-xs text-center text-slate-500 mt-3">
-                Update your <Link to="/profile" className="text-indigo-600 hover:underline">Student Profile</Link> if you believe this is incorrect.
+                Update your <Link to="/student/profile" className="text-indigo-600 hover:underline">Student Profile</Link> if you believe this is incorrect.
               </p>
             )}
           </div>
@@ -226,8 +232,30 @@ const DriveDetailsPage = () => {
             </h3>
             <ul className="space-y-4 text-sm text-slate-600">
               <li className="flex justify-between items-center pb-3 border-b border-slate-100">
-                <span className="font-medium text-slate-700">Minimum CGPA</span>
-                <span className="font-semibold text-slate-900">{eligibilityCriteria?.minCgpa || 'No minimum'}</span>
+                <span className="font-medium text-slate-700">Min 10th Standard %</span>
+                <span className="font-semibold text-slate-900">
+                  {eligibilityCriteria?.minTenthPercentage && eligibilityCriteria.minTenthPercentage > 0
+                    ? `${eligibilityCriteria.minTenthPercentage}%`
+                    : 'No minimum'}
+                </span>
+              </li>
+              <li className="flex justify-between items-center pb-3 border-b border-slate-100">
+                <span className="font-medium text-slate-700">Min 12th / Diploma %</span>
+                <span className="font-semibold text-slate-900">
+                  {eligibilityCriteria?.minTwelfthPercentage && eligibilityCriteria.minTwelfthPercentage > 0
+                    ? `${eligibilityCriteria.minTwelfthPercentage}%`
+                    : 'No minimum'}
+                </span>
+              </li>
+              <li className="flex justify-between items-center pb-3 border-b border-slate-100">
+                <span className="font-medium text-slate-700">Undergraduate (UG) Requirement</span>
+                <span className="font-semibold text-slate-900">
+                  {ugBasis === 'CGPA'
+                    ? `Min CGPA: ${eligibilityCriteria?.minCgpa || 0}`
+                    : ugBasis === 'PERCENTAGE'
+                    ? `Min Percentage: ${eligibilityCriteria?.minUgPercentage || 0}%`
+                    : 'None (No UG minimum)'}
+                </span>
               </li>
               <li className="flex justify-between items-center pb-3 border-b border-slate-100">
                 <span className="font-medium text-slate-700">Max Active Backlogs</span>

@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { notificationService } from '../services/notificationService';
 import {
   GraduationCap,
   LayoutDashboard,
@@ -16,7 +17,50 @@ import {
 const StudentLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Coordinated notification polling and custom event listening
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchUnreadCount = async () => {
+      // If currently on notifications page, that page handles fetching and dispatches the count
+      if (location.pathname === '/student/notifications') {
+        return;
+      }
+      try {
+        const data = await notificationService.getNotifications();
+        if (isMounted && data.success) {
+          const count = data.unreadCount ?? (data.notifications || []).filter((n) => !n.isRead).length;
+          setUnreadCount(count);
+        }
+      } catch (err) {
+        // Silently catch background badge polling errors
+      }
+    };
+
+    fetchUnreadCount();
+
+    // 30s background badge polling interval
+    const intervalId = setInterval(fetchUnreadCount, 30000);
+
+    // Listen for real-time notification update events dispatched by NotificationsPage
+    const handleNotificationUpdate = (e) => {
+      if (typeof e.detail?.unreadCount === 'number' && isMounted) {
+        setUnreadCount(e.detail.unreadCount);
+      }
+    };
+
+    window.addEventListener('cpms_notifications_updated', handleNotificationUpdate);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      window.removeEventListener('cpms_notifications_updated', handleNotificationUpdate);
+    };
+  }, [location.pathname]);
 
   const handleLogout = () => {
     logout();
@@ -28,7 +72,7 @@ const StudentLayout = () => {
     { label: 'Placement Drives', path: '/student/drives', icon: Briefcase },
     { label: 'My Applications', path: '/student/applications', icon: FileCheck2 },
     { label: 'Profile', path: '/student/profile', icon: User },
-    { label: 'Notifications', path: '/student/notifications', icon: Bell },
+    { label: 'Notifications', path: '/student/notifications', icon: Bell, badge: unreadCount },
   ];
 
   return (
@@ -66,6 +110,11 @@ const StudentLayout = () => {
                   >
                     <Icon className="w-4 h-4" />
                     <span>{item.label}</span>
+                    {typeof item.badge === 'number' && item.badge > 0 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold leading-none">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    )}
                   </NavLink>
                 );
               })}
@@ -134,6 +183,11 @@ const StudentLayout = () => {
                 >
                   <Icon className="w-4 h-4" />
                   <span>{item.label}</span>
+                  {typeof item.badge === 'number' && item.badge > 0 && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full bg-indigo-600 text-white text-xs font-bold leading-none">
+                      {item.badge > 99 ? '99+' : item.badge}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}

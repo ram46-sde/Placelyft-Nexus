@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getJwtSecret } = require('../config/jwt');
 
 // Protect routes: verify JWT Bearer token
 const protect = async (req, res, next) => {
@@ -11,7 +12,7 @@ const protect = async (req, res, next) => {
   ) {
     try {
       token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'cpms_default_secret_key');
+      const decoded = jwt.verify(token, getJwtSecret());
 
       const user = await User.findById(decoded.id).select('-password');
       if (!user) {

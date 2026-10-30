@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -29,14 +29,14 @@ const ProtectedRoute = ({ allowedRoles = ['student'], loginPath = '/student/logi
           </div>
           <h2 className="text-xl font-bold text-slate-800 mb-2">Access Denied</h2>
           <p className="text-sm text-slate-600 mb-6">
-            Your account role (<span className="font-semibold">{user?.role}</span>) is not authorized to access the Student Portal.
+            Your account role (<span className="font-semibold">{user?.role}</span>) is not authorized to access this resource.
           </p>
-          <a
-            href={loginPath}
+          <Link
+            to={loginPath}
             className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
           >
             Back to Login
-          </a>
+          </Link>
         </div>
       </div>
     );

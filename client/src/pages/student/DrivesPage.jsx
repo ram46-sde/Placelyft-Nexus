@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { driveService } from '../../services/driveService';
-import { Briefcase, Building2, Calendar, MapPin, Search, ArrowRight, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { Briefcase, Building2, Calendar, Search, ArrowRight, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 const DrivesPage = () => {
   const [drives, setDrives] = useState([]);
@@ -154,7 +154,7 @@ const DrivesPage = () => {
                 {/* Card Footer (Action) */}
                 <div className="p-4 bg-slate-50 border-t border-slate-100">
                   <Link
-                    to={`/drives/${drive._id}`}
+                    to={`/student/drives/${drive._id}`}
                     className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition"
                   >
                     <span>View Full Details</span>

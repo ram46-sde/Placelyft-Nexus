@@ -66,7 +66,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('cpms_user', JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
-        return { success: true };
+        return { success: true, user: data.user };
       }
       return { success: false, message: data.message };
     } catch (err) {

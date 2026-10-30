@@ -42,6 +42,29 @@ const placementDriveSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      minTenthPercentage: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 0,
+      },
+      minTwelfthPercentage: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 0,
+      },
+      ugCriteriaType: {
+        type: String,
+        enum: ['CGPA', 'PERCENTAGE', 'NONE'],
+        // Explicitly NO default to keep undefined on legacy drives
+      },
+      minUgPercentage: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 0,
+      },
       maxBacklogs: {
         type: Number,
         default: 0, // 0 means no active backlogs allowed, higher means allowed up to that number

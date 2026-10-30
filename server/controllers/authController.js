@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const College = require('../models/College');
 const generateToken = require('../utils/generateToken');
@@ -33,25 +34,43 @@ const registerStudent = async (req, res, next) => {
       });
     }
 
-    // Controlled Approach: Default Single-College Assignment
-    // To preserve the existing registration flow without exposing a public college selector,
-    // we assign the student to the primary active college. 
-    // Once multi-college is fully active, this will be replaced by an invitation-code system.
-    const defaultCollege = await College.findOne({ isActive: true });
-    if (!defaultCollege) {
+    // Explicit Single-College Resolution
+    // Enforces configured college strictly via process.env.COLLEGE_ID and fails closed.
+    // Removes the unsafe College.findOne({ isActive: true }) fallback.
+    const configuredCollegeId = process.env.COLLEGE_ID;
+    if (
+      !configuredCollegeId ||
+      typeof configuredCollegeId !== 'string' ||
+      !configuredCollegeId.trim() ||
+      !mongoose.Types.ObjectId.isValid(configuredCollegeId.trim())
+    ) {
       return res.status(500).json({
         success: false,
-        message: 'System configuration error: No active college found to associate with this account.',
+        message: 'System configuration error: COLLEGE_ID is missing or invalid.',
       });
     }
 
-    // Create user with explicit 'student' role and collegeId
+    const targetCollege = await College.findOne({
+      _id: configuredCollegeId.trim(),
+      isActive: true,
+    });
+
+    if (!targetCollege) {
+      return res.status(500).json({
+        success: false,
+        message: 'System configuration error: Configured college not found or is inactive.',
+      });
+    }
+
+    // Create user with explicit 'student' role, verified collegeId, and VERIFIED status
+    // Client-supplied role or collegeId is strictly ignored.
     const user = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
       role: 'student',
-      collegeId: defaultCollege._id,
+      collegeId: targetCollege._id,
+      collegeAssignmentStatus: 'VERIFIED',
     });
 
     // Generate JWT token
@@ -66,6 +85,8 @@ const registerStudent = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        collegeId: user.collegeId,
+        collegeAssignmentStatus: user.collegeAssignmentStatus,
       },
     });
   } catch (error) {
@@ -125,6 +146,8 @@ const login = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        collegeId: user.collegeId,
+        collegeAssignmentStatus: user.collegeAssignmentStatus,
       },
     });
   } catch (error) {
@@ -152,6 +175,8 @@ const getMe = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        collegeId: user.collegeId,
+        collegeAssignmentStatus: user.collegeAssignmentStatus,
       },
     });
   } catch (error) {

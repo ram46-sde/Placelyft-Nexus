@@ -1,9 +1,10 @@
 const jwt = require('jsonwebtoken');
+const { getJwtSecret } = require('../config/jwt');
 
 const generateToken = (id, role) => {
   return jwt.sign(
     { id, role },
-    process.env.JWT_SECRET || 'cpms_default_secret_key',
+    getJwtSecret(),
     { expiresIn: '7d' }
   );
 };

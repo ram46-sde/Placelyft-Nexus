@@ -10,11 +10,12 @@ const LoginPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setFormError('');
 
     if (!email.trim() || !password) {
@@ -27,6 +28,14 @@ const LoginPage = () => {
     setSubmitting(false);
 
     if (result.success) {
+      // Role verification: ensure user is a student
+      if (result.user?.role !== 'student') {
+        logout();
+        setFormError(
+          `Access denied: Account '${email}' has role '${result.user?.role || 'user'}', but this portal is for students only.`
+        );
+        return;
+      }
       navigate('/student/dashboard');
     } else {
       setFormError(result.message || 'Invalid credentials.');

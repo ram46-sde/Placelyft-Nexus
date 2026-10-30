@@ -17,8 +17,18 @@ const applyForDrive = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Placement drive not found.' });
     }
 
-    if (drive.collegeId && req.user.collegeId && drive.collegeId.toString() !== req.user.collegeId.toString()) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this placement drive.' });
+    // Verify multi-tenant data isolation:
+    // Both the drive and the user MUST have a valid collegeId, must not be unverified, and they must match.
+    if (
+      !drive.collegeId ||
+      !req.user.collegeId ||
+      req.user.collegeAssignmentStatus === 'LEGACY_UNVERIFIED' ||
+      drive.collegeId.toString() !== req.user.collegeId.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized access to this placement drive.',
+      });
     }
     if (!drive.isActive) {
       return res.status(400).json({ success: false, message: 'This placement drive is no longer active.' });
@@ -49,10 +59,11 @@ const applyForDrive = async (req, res, next) => {
       });
     }
 
-    // 4. Create Application
+    // 4. Create Application (Explicit server-side collegeId derivation; client collegeId strictly ignored)
     const application = await DriveApplication.create({
       student: req.user._id,
       placementDrive: driveId,
+      collegeId: req.user.collegeId,
       status: 'Applied',
     });
 
@@ -71,6 +82,13 @@ const applyForDrive = async (req, res, next) => {
 // @access  Private (Student)
 const getMyApplications = async (req, res, next) => {
   try {
+    if (!req.user.collegeId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Student account is not associated with an institution.',
+      });
+    }
+
     const applications = await DriveApplication.find({ student: req.user._id })
       .populate({
         path: 'placementDrive',

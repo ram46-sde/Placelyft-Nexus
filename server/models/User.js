@@ -35,6 +35,13 @@ const userSchema = new mongoose.Schema(
       ref: 'College',
       // Enforced by business logic instead of strict DB validation to preserve backward compatibility for existing records
     },
+    // Additive onboarding verification status (Milestone 2)
+    // Explicitly avoids blanket VERIFIED default to ensure verification is granted only by authorized workflows
+    collegeAssignmentStatus: {
+      type: String,
+      enum: ['VERIFIED', 'LEGACY_UNVERIFIED', 'PENDING_APPROVAL'],
+      default: 'PENDING_APPROVAL',
+    },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Company',
