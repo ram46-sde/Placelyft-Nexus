@@ -2,9 +2,29 @@ const mongoose = require('mongoose');
 const PlacementDrive = require('../models/PlacementDrive');
 const Company = require('../models/Company');
 const DriveApplication = require('../models/DriveApplication');
+const DriveAttendance = require('../models/DriveAttendance');
 const StudentProfile = require('../models/StudentProfile');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { resolveUgBasis } = require('../utils/eligibilityEngine');
+const { getDriveLifecycleStatus } = require('../utils/driveLifecycle');
+
+/**
+ * Shared registry of placement drive dependent records.
+ * Permanent delete requires zero dependent records across all registered collections.
+ */
+const DRIVE_DEPENDENTS = [
+  {
+    model: DriveApplication,
+    name: 'student application',
+    query: (driveId) => ({ placementDrive: driveId }),
+  },
+  {
+    model: DriveAttendance,
+    name: 'attendance record',
+    query: (driveId) => ({ placementDrive: driveId }),
+  },
+];
 
 /**
  * Validates that the authenticated officer has a valid assigned college context.
@@ -32,6 +52,65 @@ const validateOfficerCollegeContext = (user) => {
   return { valid: true };
 };
 
+/**
+ * Validates and sanitizes companyLocation according to CPMS rules:
+ * - Trims whitespace and collapses repeated spaces
+ * - Length between 2 and 100 characters
+ * - Unicode letters, numbers, spaces, and punctuation (, . - ( ) & /)
+ * - Rejects whitespace-only or punctuation-only values (requires alphanumeric character)
+ * @param {*} location
+ * @param {boolean} isRequired
+ * @returns {{ valid: boolean, sanitized?: string, message?: string }}
+ */
+const validateCompanyLocation = (location, isRequired = true) => {
+  if (location === undefined || location === null || (typeof location === 'string' && !location.trim())) {
+    if (isRequired) {
+      return {
+        valid: false,
+        message: 'companyLocation is required and must be between 2 and 100 characters.',
+      };
+    }
+    return { valid: true, sanitized: undefined };
+  }
+
+  if (typeof location !== 'string') {
+    return {
+      valid: false,
+      message: 'companyLocation must be a string.',
+    };
+  }
+
+  // Collapse repeated spaces and trim
+  const sanitized = location.trim().replace(/\s+/g, ' ');
+
+  if (sanitized.length < 2 || sanitized.length > 100) {
+    return {
+      valid: false,
+      message: 'companyLocation must be between 2 and 100 characters in length.',
+    };
+  }
+
+  // Allow Unicode letters, digits, spaces, and , . - ( ) & /
+  const allowedCharsRegex = /^[\p{L}\p{N}\s,.\-()&/]+$/u;
+  if (!allowedCharsRegex.test(sanitized)) {
+    return {
+      valid: false,
+      message: 'companyLocation contains invalid characters. Allowed characters are letters, numbers, spaces, and punctuation (, . - ( ) & /).',
+    };
+  }
+
+  // Reject punctuation-only or whitespace-only values: must contain at least one letter or number
+  const hasAlphanumeric = /[\p{L}\p{N}]/u.test(sanitized);
+  if (!hasAlphanumeric) {
+    return {
+      valid: false,
+      message: 'companyLocation cannot consist solely of punctuation or whitespace.',
+    };
+  }
+
+  return { valid: true, sanitized };
+};
+
 // @desc    Create a new placement drive
 // @route   POST /api/officer/drives
 // @access  Private (Placement Officer)
@@ -53,6 +132,7 @@ const createDrive = async (req, res, next) => {
       website,
       companyDescription,
       logoUrl,
+      companyLocation,
       jobRole,
       jobDescription,
       packageDetails,
@@ -74,6 +154,29 @@ const createDrive = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'jobDescription is required and must be a non-empty string.',
+      });
+    }
+
+    if (jobDescription.trim().length < 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'jobDescription must be at least 10 characters long.',
+      });
+    }
+
+    if (jobDescription.trim().length > 5000) {
+      return res.status(400).json({
+        success: false,
+        message: 'jobDescription must not exceed 5000 characters.',
+      });
+    }
+
+    // Validate companyLocation
+    const locationValidation = validateCompanyLocation(companyLocation, true);
+    if (!locationValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: locationValidation.message,
       });
     }
 
@@ -399,6 +502,7 @@ const createDrive = async (req, res, next) => {
       jobRole: jobRole.trim(),
       jobDescription: jobDescription.trim(),
       packageDetails: packageDetails ? packageDetails.trim() : undefined,
+      companyLocation: locationValidation.sanitized,
       driveDate: parsedDriveDate,
       registrationDeadline: parsedDeadline,
       isActive: isActive !== undefined ? Boolean(isActive) : true,
@@ -409,11 +513,43 @@ const createDrive = async (req, res, next) => {
     const driveObj = populatedDrive.toObject();
     const effectiveUgCriteriaType = resolveUgBasis(populatedDrive.eligibilityCriteria);
 
+    // 5. Notify all active, verified students belonging to the officer's college (Failure-isolated)
+    try {
+      const verifiedStudents = await User.find({
+        role: 'student',
+        collegeId: req.user.collegeId,
+        collegeAssignmentStatus: 'VERIFIED',
+        isActive: true,
+      }).select('_id');
+
+      if (verifiedStudents && verifiedStudents.length > 0) {
+        const companyName =
+          (populatedDrive && populatedDrive.company && populatedDrive.company.name) ||
+          'A company';
+
+        const notificationDocs = verifiedStudents.map((st) => ({
+          recipient: st._id,
+          collegeId: req.user.collegeId,
+          title: `New Placement Drive: ${jobRole.trim()}`,
+          message: `${companyName} has announced a new placement drive for ${jobRole.trim()}. Check eligibility and apply before the deadline.`,
+          type: 'DRIVE_ANNOUNCEMENT',
+          placementDrive: newDrive._id,
+          isRead: false,
+        }));
+
+        await Notification.insertMany(notificationDocs, { ordered: false });
+      }
+    } catch (notifErr) {
+      // Failure isolation: Drive creation must succeed even if notifications fail
+      console.error('[Drive Creation Notification Error]:', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Placement drive created successfully.',
       drive: {
         ...driveObj,
+        status: getDriveLifecycleStatus(newDrive),
         effectiveUgCriteriaType,
         eligibilityCriteria: {
           ...driveObj.eligibilityCriteria,
@@ -444,11 +580,23 @@ const getOfficerDrives = async (req, res, next) => {
       .populate('company')
       .sort({ driveDate: 1 });
 
+    const now = new Date();
+    let activeCount = 0;
+    let closedCount = 0;
+    let archivedCount = 0;
+
     const drivesWithBasis = drives.map((drive) => {
       const driveObj = drive.toObject();
       const effectiveUgCriteriaType = resolveUgBasis(drive.eligibilityCriteria);
+      const status = getDriveLifecycleStatus(drive, now);
+
+      if (status === 'active') activeCount += 1;
+      else if (status === 'closed') closedCount += 1;
+      else if (status === 'archived') archivedCount += 1;
+
       return {
         ...driveObj,
+        status,
         effectiveUgCriteriaType,
         eligibilityCriteria: {
           ...driveObj.eligibilityCriteria,
@@ -457,9 +605,17 @@ const getOfficerDrives = async (req, res, next) => {
       };
     });
 
+    const totalCount = activeCount + closedCount;
+
     res.status(200).json({
       success: true,
       count: drivesWithBasis.length,
+      counts: {
+        total: totalCount,
+        active: activeCount,
+        closed: closedCount,
+        archived: archivedCount,
+      },
       drives: drivesWithBasis,
     });
   } catch (error) {
@@ -697,9 +853,211 @@ const updateApplicationStatus = async (req, res, next) => {
   }
 };
 
+// @desc    Archive a placement drive (officer only)
+// @route   PATCH /api/officer/drives/:id/archive
+// @access  Private (Placement Officer)
+const archiveDrive = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid drive ID format.' });
+    }
+
+    const drive = await PlacementDrive.findById(id);
+    if (!drive) {
+      return res.status(404).json({ success: false, message: 'Placement drive not found.' });
+    }
+
+    // Tenant isolation: must belong to officer's college
+    if (!drive.collegeId || drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Cannot archive a drive that belongs to another institution.',
+      });
+    }
+
+    if (drive.isArchived) {
+      return res.status(400).json({ success: false, message: 'Drive is already archived.' });
+    }
+
+    const currentStatus = getDriveLifecycleStatus(drive);
+    if (currentStatus !== 'closed') {
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVE_NOT_CLOSED',
+        message: 'Only closed drives can be archived. A drive must be closed (deadline passed or manually closed) before it can be archived.',
+      });
+    }
+
+    drive.isArchived = true;
+    drive.isActive = false;
+    drive.archivedAt = new Date();
+    drive.archivedBy = req.user._id;
+    await drive.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Placement drive archived successfully.',
+      drive: {
+        ...drive.toObject(),
+        status: 'archived',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Restore an archived placement drive (officer only)
+// @route   PATCH /api/officer/drives/:id/restore
+// @access  Private (Placement Officer)
+const restoreDrive = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid drive ID format.' });
+    }
+
+    const drive = await PlacementDrive.findById(id);
+    if (!drive) {
+      return res.status(404).json({ success: false, message: 'Placement drive not found.' });
+    }
+
+    // Tenant isolation
+    if (!drive.collegeId || drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Cannot restore a drive that belongs to another institution.',
+      });
+    }
+
+    if (!drive.isArchived) {
+      return res.status(400).json({ success: false, message: 'Drive is not currently archived.' });
+    }
+
+    drive.isArchived = false;
+    drive.archivedAt = undefined;
+    drive.archivedBy = undefined;
+    drive.isActive = true;
+    await drive.save();
+
+    const restoredStatus = getDriveLifecycleStatus(drive);
+
+    res.status(200).json({
+      success: true,
+      message: 'Placement drive restored successfully.',
+      drive: {
+        ...drive.toObject(),
+        status: restoredStatus,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Permanently delete an archived drive with zero dependent records (officer only)
+// @route   DELETE /api/officer/drives/:id
+// @access  Private (Placement Officer)
+const deleteDrive = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid drive ID format.' });
+    }
+
+    // Verify drive exists and is accessible to this officer's college
+    const drive = await PlacementDrive.findById(id);
+    if (!drive) {
+      return res.status(404).json({ success: false, message: 'Placement drive not found.' });
+    }
+
+    // Tenant isolation check
+    if (!drive.collegeId || drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Cannot delete a drive that belongs to another institution.',
+      });
+    }
+
+    // Gate 1: Drive must be archived before permanent deletion
+    if (!drive.isArchived) {
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVE_NOT_ARCHIVED',
+        message: 'Drive must be archived before it can be permanently deleted. Archive the drive first.',
+      });
+    }
+
+    // Gate 2: No dependent records (DriveApplication or DriveAttendance) (HTTP 409 Conflict)
+    for (const dep of DRIVE_DEPENDENTS) {
+      const depCount = await dep.model.countDocuments(dep.query(id));
+      if (depCount > 0) {
+        return res.status(409).json({
+          success: false,
+          code: 'DRIVE_DELETE_BLOCKED_DEPENDENT_RECORDS',
+          message: `Cannot permanently delete this drive because ${depCount} ${dep.name}(s) exist. We recommend keeping the drive archived to preserve recruitment and applicant records.`,
+        });
+      }
+    }
+
+    // Atomic delete: re-checks tenant + isArchived in the query to guard against concurrent requests
+    const deleted = await PlacementDrive.findOneAndDelete({
+      _id: id,
+      collegeId: req.user.collegeId,
+      isArchived: true,
+    });
+
+    if (!deleted) {
+      // Drive was concurrently deleted or conditions changed — idempotent response
+      return res.status(404).json({
+        success: false,
+        code: 'DRIVE_NOT_FOUND',
+        message: 'Placement drive not found or no longer meets deletion criteria.',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Placement drive permanently deleted.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createDrive,
   getOfficerDrives,
   getDriveApplicants,
   updateApplicationStatus,
+  archiveDrive,
+  restoreDrive,
+  deleteDrive,
+  validateCompanyLocation,
+  validateOfficerCollegeContext,
 };

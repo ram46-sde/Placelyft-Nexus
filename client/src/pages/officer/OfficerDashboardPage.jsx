@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
 import CreateDriveModal from '../../components/officer/CreateDriveModal';
 import DriveApplicantsModal from '../../components/officer/DriveApplicantsModal';
+import DepartmentManagementSection from '../../components/officer/DepartmentManagementSection';
+import CompanyLocation from '../../components/common/CompanyLocation';
 import {
   Briefcase,
   Plus,
@@ -18,20 +20,81 @@ import {
   RefreshCw,
   AlertCircle,
   Filter,
-  DollarSign,
+  IndianRupee,
   Layers,
   Award,
   Loader2,
   CheckCircle,
+  Archive,
+  ArchiveRestore,
+  Trash2,
 } from 'lucide-react';
 
-const isDriveActive = (drive) => {
-  if (!drive || !drive.isActive) return false;
-  if (!drive.registrationDeadline) return true;
-  const deadline = new Date(drive.registrationDeadline);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return deadline.getTime() >= today.getTime();
+/**
+ * Checks whether a registration deadline has passed relative to the given reference time.
+ * Matches server/utils/driveLifecycle.js:
+ * - Date-only (YYYY-MM-DD or midnight UTC/local): stays open until end of that day (23:59:59.999).
+ * - Datetime: compares exact instant.
+ */
+const isRegistrationDeadlinePassed = (registrationDeadline, now = new Date()) => {
+  if (!registrationDeadline) return false;
+  const deadlineDate = new Date(registrationDeadline);
+  if (isNaN(deadlineDate.getTime())) return false;
+
+  const refTime = new Date(now).getTime();
+
+  const isDateOnly =
+    (typeof registrationDeadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(registrationDeadline.trim())) ||
+    (deadlineDate.getUTCHours() === 0 &&
+      deadlineDate.getUTCMinutes() === 0 &&
+      deadlineDate.getUTCSeconds() === 0 &&
+      deadlineDate.getUTCMilliseconds() === 0) ||
+    (deadlineDate.getHours() === 0 &&
+      deadlineDate.getMinutes() === 0 &&
+      deadlineDate.getSeconds() === 0 &&
+      deadlineDate.getMilliseconds() === 0);
+
+  let effectiveDeadlineTimestamp;
+  if (isDateOnly) {
+    const endOfDay = new Date(deadlineDate);
+    if (
+      deadlineDate.getUTCHours() === 0 &&
+      deadlineDate.getUTCMinutes() === 0 &&
+      deadlineDate.getUTCSeconds() === 0 &&
+      deadlineDate.getUTCMilliseconds() === 0
+    ) {
+      endOfDay.setUTCHours(23, 59, 59, 999);
+    } else {
+      endOfDay.setHours(23, 59, 59, 999);
+    }
+    effectiveDeadlineTimestamp = endOfDay.getTime();
+  } else {
+    effectiveDeadlineTimestamp = deadlineDate.getTime();
+  }
+
+  return refTime >= effectiveDeadlineTimestamp;
+};
+
+/**
+ * Returns single source of truth drive lifecycle status: 'archived' | 'closed' | 'active'.
+ * Priority hierarchy:
+ * 1. 'archived': drive is archived (takes priority over everything)
+ * 2. 'closed': not archived AND (manually closed [isActive === false] OR drive.status === 'closed' OR deadline passed)
+ * 3. 'active': neither (genuinely active)
+ */
+const getDriveStatus = (drive, now = new Date()) => {
+  if (!drive) return 'closed';
+  if (drive.isArchived || drive.status === 'archived') return 'archived';
+  if (drive.isActive === false || drive.status === 'closed') return 'closed';
+  if (isRegistrationDeadlinePassed(drive.registrationDeadline, now)) return 'closed';
+  return 'active';
+};
+
+/**
+ * Returns true if drive is genuinely active according to single source of truth lifecycle rules.
+ */
+const isDriveActive = (drive, now = new Date()) => {
+  return getDriveStatus(drive, now) === 'active';
 };
 
 const OfficerDashboardPage = () => {
@@ -39,10 +102,13 @@ const OfficerDashboardPage = () => {
   const navigate = useNavigate();
 
   // State
+  const [activeTab, setActiveTab] = useState('drives'); // 'drives' | 'departments'
   const [drives, setDrives] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''); // Only for page-level fetch errors
+  const [actionError, setActionError] = useState(''); // For action-specific toasts (archive, restore, delete)
   const [successBanner, setSuccessBanner] = useState('');
+  const [serverCounts, setServerCounts] = useState({ total: 0, active: 0, closed: 0, archived: 0 });
 
   // Per-drive applicant statistics map: { [driveId]: { count: number, offersCount: number, applications: [] } }
   const [driveStats, setDriveStats] = useState({});
@@ -50,7 +116,10 @@ const OfficerDashboardPage = () => {
 
   // Filters & search
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'ACTIVE' | 'CLOSED'
+  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED'
+
+  // Per-drive action state
+  const [actionLoading, setActionLoading] = useState({}); // { [driveId]: 'archiving' | 'restoring' | 'deleting' | null }
 
   // Modals state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -106,6 +175,9 @@ const OfficerDashboardPage = () => {
       if (data.success) {
         const loadedDrives = data.drives || [];
         setDrives(loadedDrives);
+        if (data.counts) {
+          setServerCounts(data.counts);
+        }
         // Once drives are loaded, fetch applicant statistics for real summary metrics
         await fetchApplicantStats(loadedDrives);
       } else {
@@ -124,7 +196,15 @@ const OfficerDashboardPage = () => {
 
   // Handler when a new drive is successfully created
   const handleDriveCreated = (newDrive) => {
+    const newDriveStatus = getDriveStatus(newDrive);
     setDrives((prev) => [newDrive, ...prev]);
+    setServerCounts((prev) => ({
+      ...prev,
+      total: (prev.total || 0) + (newDriveStatus !== 'archived' ? 1 : 0),
+      active: newDriveStatus === 'active' ? (prev.active || 0) + 1 : (prev.active || 0),
+      closed: newDriveStatus === 'closed' ? (prev.closed || 0) + 1 : (prev.closed || 0),
+      archived: newDriveStatus === 'archived' ? (prev.archived || 0) + 1 : (prev.archived || 0),
+    }));
     setDriveStats((prev) => ({
       ...prev,
       [newDrive._id]: { count: 0, offersCount: 0, applications: [] },
@@ -158,10 +238,12 @@ const OfficerDashboardPage = () => {
     });
   };
 
-  // Real summary metrics computation
+  // Real summary metrics computation using server-side single source of truth
   const summaryMetrics = useMemo(() => {
-    const totalDrives = drives.length;
-    const activeDrives = drives.filter(isDriveActive).length;
+    const totalDrives = serverCounts.total ?? drives.filter((d) => getDriveStatus(d) !== 'archived').length;
+    const activeDrives = serverCounts.active ?? drives.filter((d) => isDriveActive(d)).length;
+    const closedDrives = serverCounts.closed ?? drives.filter((d) => getDriveStatus(d) === 'closed').length;
+    const archivedDrives = serverCounts.archived ?? drives.filter((d) => getDriveStatus(d) === 'archived').length;
 
     let totalApplicants = 0;
     let totalOffers = 0;
@@ -174,18 +256,21 @@ const OfficerDashboardPage = () => {
     return {
       totalDrives,
       activeDrives,
+      closedDrives,
+      archivedDrives,
       totalApplicants,
       totalOffers,
     };
-  }, [drives, driveStats]);
+  }, [drives, serverCounts, driveStats]);
 
-  // Client-side search and status filtering
+  // Client-side search and status filtering based on single source of truth status
   const filteredDrives = useMemo(() => {
     return drives.filter((drive) => {
       const query = searchTerm.toLowerCase().trim();
       const companyName = drive.company?.name || '';
       const industry = drive.company?.industry || '';
       const jobRole = drive.jobRole || '';
+      const location = drive.companyLocation || '';
       const skills = (drive.eligibilityCriteria?.requiredSkills || []).join(' ');
 
       const matchesSearch =
@@ -193,13 +278,16 @@ const OfficerDashboardPage = () => {
         companyName.toLowerCase().includes(query) ||
         industry.toLowerCase().includes(query) ||
         jobRole.toLowerCase().includes(query) ||
+        location.toLowerCase().includes(query) ||
         skills.toLowerCase().includes(query);
 
-      const active = isDriveActive(drive);
+      const status = getDriveStatus(drive);
       const matchesFilter =
-        statusFilter === 'ALL' ||
-        (statusFilter === 'ACTIVE' && active) ||
-        (statusFilter === 'CLOSED' && !active);
+        statusFilter === 'ALL'      ? status !== 'archived' :
+        statusFilter === 'ACTIVE'   ? status === 'active' :
+        statusFilter === 'CLOSED'   ? status === 'closed' :
+        statusFilter === 'ARCHIVED' ? status === 'archived' :
+        true;
 
       return matchesSearch && matchesFilter;
     });
@@ -212,6 +300,74 @@ const OfficerDashboardPage = () => {
       month: 'short',
       day: 'numeric',
     });
+  };
+
+  // --- Drive lifecycle actions ---
+  const handleArchive = async (drive) => {
+    if (actionLoading[drive._id]) return;
+    if (!window.confirm(`Archive "${drive.jobRole}" at ${drive.company?.name || 'this company'}? It will be hidden from students.`)) return;
+
+    setActionLoading((prev) => ({ ...prev, [drive._id]: 'archiving' }));
+    setActionError('');
+    try {
+      const res = await officerService.archiveDrive(drive._id);
+      if (res.success) {
+        setSuccessBanner(`"${drive.jobRole}" archived successfully.`);
+        setTimeout(() => setSuccessBanner(''), 4000);
+        await fetchDrives(); // Refetch list only after successful action
+      } else {
+        setActionError(res.message || 'Failed to archive drive.');
+      }
+    } catch (err) {
+      setActionError(err.response?.data?.message || 'Error archiving drive.');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [drive._id]: null }));
+    }
+  };
+
+  const handleRestore = async (drive) => {
+    if (actionLoading[drive._id]) return;
+
+    setActionLoading((prev) => ({ ...prev, [drive._id]: 'restoring' }));
+    setActionError('');
+    try {
+      const res = await officerService.restoreDrive(drive._id);
+      if (res.success) {
+        setSuccessBanner(`"${drive.jobRole}" restored successfully.`);
+        setTimeout(() => setSuccessBanner(''), 4000);
+        await fetchDrives(); // Refetch list only after successful action
+      } else {
+        setActionError(res.message || 'Failed to restore drive.');
+      }
+    } catch (err) {
+      setActionError(err.response?.data?.message || 'Error restoring drive.');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [drive._id]: null }));
+    }
+  };
+
+  const handleDelete = async (drive) => {
+    if (actionLoading[drive._id]) return;
+    if (!window.confirm(`Permanently delete "${drive.jobRole}"? This CANNOT be undone.`)) return;
+
+    setActionLoading((prev) => ({ ...prev, [drive._id]: 'deleting' }));
+    setActionError('');
+    try {
+      const res = await officerService.deleteDrive(drive._id);
+      if (res.success) {
+        setSuccessBanner(`"${drive.jobRole}" permanently deleted.`);
+        setTimeout(() => setSuccessBanner(''), 4000);
+        await fetchDrives(); // Refetch list only after successful action
+      } else {
+        setActionError(res.message || 'Failed to delete drive.');
+      }
+    } catch (err) {
+      // 409 Conflict with dependent records explanation or other error
+      const errorMsg = err.response?.data?.message || 'Error deleting drive.';
+      setActionError(errorMsg);
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [drive._id]: null }));
+    }
   };
 
   return (
@@ -282,7 +438,56 @@ const OfficerDashboardPage = () => {
           </div>
         )}
 
-        {/* Page Title & Primary Actions */}
+        {/* Action Error Banner (Toast style) */}
+        {actionError && (
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-start justify-between shadow-xs">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold block">Action Blocked</span>
+                <span className="text-xs text-rose-700 mt-0.5 block">{actionError}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setActionError('')}
+              className="text-xs font-semibold text-rose-700 hover:text-rose-900 cursor-pointer ml-4 shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-slate-200/80 pb-3">
+          <button
+            onClick={() => setActiveTab('drives')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
+              activeTab === 'drives'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <Briefcase className="w-4 h-4" />
+            <span>Placement Drives</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('departments')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
+              activeTab === 'departments'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Department Management</span>
+          </button>
+        </div>
+
+        {activeTab === 'departments' ? (
+          <DepartmentManagementSection />
+        ) : (
+          <>
+            {/* Page Title & Primary Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Placement Drives</h1>
@@ -409,7 +614,7 @@ const OfficerDashboardPage = () => {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                All ({drives.length})
+                All ({summaryMetrics.totalDrives})
               </button>
               <button
                 onClick={() => setStatusFilter('ACTIVE')}
@@ -429,7 +634,17 @@ const OfficerDashboardPage = () => {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Closed ({drives.length - summaryMetrics.activeDrives})
+                Closed ({summaryMetrics.closedDrives})
+              </button>
+              <button
+                onClick={() => setStatusFilter('ARCHIVED')}
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  statusFilter === 'ARCHIVED'
+                    ? 'bg-white text-amber-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Archived ({summaryMetrics.archivedDrives})
               </button>
             </div>
           </div>
@@ -500,6 +715,7 @@ const OfficerDashboardPage = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
             {filteredDrives.map((drive) => {
               const active = isDriveActive(drive);
+              const driveStatus = getDriveStatus(drive);
               const stats = driveStats[drive._id] || { count: 0, offersCount: 0 };
               const eligibility = drive.eligibilityCriteria || {};
 
@@ -541,21 +757,31 @@ const OfficerDashboardPage = () => {
                               </a>
                             )}
                           </div>
-                          <span className="text-xs text-slate-500 font-medium">
-                            {drive.company?.industry || 'Technology & Services'}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                            <span className="text-xs text-slate-500 font-medium">
+                              {drive.company?.industry || 'Technology & Services'}
+                            </span>
+                            <span className="text-slate-300">•</span>
+                            <CompanyLocation location={drive.companyLocation} className="inline-flex items-center gap-1 text-xs text-slate-500 min-w-0" iconClassName="w-3 h-3 text-slate-400 shrink-0" />
+                          </div>
                         </div>
                       </div>
 
-                      {/* Status badge */}
+                      {/* Status badge based on single source of truth */}
                       <span
                         className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${
-                          active
+                          driveStatus === 'archived'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : active
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-300'
                         }`}
                       >
-                        {active ? '● Active' : '○ Closed'}
+                        {driveStatus === 'archived'
+                          ? '📦 Archived'
+                          : active
+                          ? '● Active'
+                          : '✕ Registration Closed'}
                       </span>
                     </div>
 
@@ -565,7 +791,7 @@ const OfficerDashboardPage = () => {
                         <div className="text-sm font-bold text-slate-900">{drive.jobRole}</div>
                         {drive.packageDetails && (
                           <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-100">
-                            <DollarSign className="w-3 h-3 text-emerald-600" />
+                            <IndianRupee className="w-3 h-3 text-emerald-600" />
                             <span>{drive.packageDetails}</span>
                           </div>
                         )}
@@ -655,8 +881,8 @@ const OfficerDashboardPage = () => {
                     </div>
                   </div>
 
-                  {/* Drive Card Footer: Stats & "View Applicants" Action */}
-                  <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
+                  {/* Drive Card Footer: Stats, Archive/Delete & "View Applicants" Action */}
+                  <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3 text-xs">
                       <div className="flex items-center gap-1 text-slate-700 font-semibold">
                         <Users className="w-3.5 h-3.5 text-emerald-600" />
@@ -670,18 +896,61 @@ const OfficerDashboardPage = () => {
                       )}
                     </div>
 
-                    <button
-                      onClick={() => setSelectedDriveForApplicants(drive)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
-                    >
-                      <Users className="w-3.5 h-3.5" />
-                      <span>View Applicants</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* Archive / Restore / Delete actions based on single source of truth */}
+                      {driveStatus === 'archived' ? (
+                        <>
+                          <button
+                            onClick={() => handleRestore(drive)}
+                            disabled={!!actionLoading[drive._id]}
+                            title="Restore drive"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-50"
+                          >
+                            {actionLoading[drive._id] === 'restoring' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArchiveRestore className="w-3.5 h-3.5" />}
+                            <span>Restore</span>
+                          </button>
+                          <button
+                            onClick={() => handleDelete(drive)}
+                            disabled={!!actionLoading[drive._id]}
+                            title="Permanently delete drive"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {actionLoading[drive._id] === 'deleting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            <span>Delete</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleArchive(drive)}
+                            disabled={!!actionLoading[drive._id] || driveStatus !== 'closed'}
+                            title={driveStatus === 'closed' ? 'Archive drive' : 'Only closed drives can be archived'}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition ${
+                              driveStatus === 'closed'
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 cursor-pointer disabled:opacity-50'
+                                : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                            }`}
+                          >
+                            {actionLoading[drive._id] === 'archiving' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+                            <span>Archive</span>
+                          </button>
+                          <button
+                            onClick={() => setSelectedDriveForApplicants(drive)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            <span>View Applicants</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
+        )}
+          </>
         )}
       </main>
 

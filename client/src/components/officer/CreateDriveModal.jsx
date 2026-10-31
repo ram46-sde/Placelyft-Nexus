@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { officerService } from '../../services/officerService';
-import { X, Briefcase, Building2, Calendar, FileText, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { X, Briefcase, Building2, Calendar, FileText, CheckCircle2, Loader2, AlertCircle, MapPin } from 'lucide-react';
 
 const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
   const [formData, setFormData] = useState({
@@ -8,6 +8,7 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
     industry: '',
     website: '',
     companyDescription: '',
+    companyLocation: '',
     jobRole: '',
     jobDescription: '',
     packageDetails: '',
@@ -45,6 +46,27 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
     // 1. Client-side field validations
     if (!formData.companyName.trim()) {
       setError('Company name is required.');
+      return;
+    }
+
+    if (!formData.companyLocation || !formData.companyLocation.trim()) {
+      setError('Company location is required.');
+      return;
+    }
+
+    const sanitizedLocation = formData.companyLocation.trim().replace(/\s+/g, ' ');
+    if (sanitizedLocation.length < 2 || sanitizedLocation.length > 100) {
+      setError('Company location must be between 2 and 100 characters.');
+      return;
+    }
+
+    if (!/^[\p{L}\p{N}\s,.\-()&/]+$/u.test(sanitizedLocation)) {
+      setError('Company location contains invalid characters. Allowed: letters, numbers, spaces, and (, . - ( ) & /).');
+      return;
+    }
+
+    if (!/[\p{L}\p{N}]/u.test(sanitizedLocation)) {
+      setError('Company location cannot consist solely of punctuation or whitespace.');
       return;
     }
 
@@ -152,6 +174,7 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
       industry: formData.industry.trim() || undefined,
       website: formData.website.trim() || undefined,
       companyDescription: formData.companyDescription.trim() || undefined,
+      companyLocation: sanitizedLocation,
       jobRole: formData.jobRole.trim(),
       jobDescription: formData.jobDescription.trim(),
       packageDetails: formData.packageDetails.trim() || undefined,
@@ -281,6 +304,25 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 outline-none"
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Company Location <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    name="companyLocation"
+                    value={formData.companyLocation}
+                    onChange={handleChange}
+                    placeholder="e.g. Coimbatore, Tamil Nadu, India"
+                    maxLength={100}
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 outline-none"
+                    required
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -327,10 +369,14 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
                   value={formData.jobDescription}
                   onChange={handleChange}
                   rows={3}
+                  maxLength={5000}
                   placeholder="Describe key responsibilities, requirements, and candidate expectations..."
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 outline-none"
                   required
                 />
+                <p className={`text-[11px] mt-0.5 text-right ${formData.jobDescription.length > 4800 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                  {formData.jobDescription.length}/5000
+                </p>
               </div>
             </div>
           </div>

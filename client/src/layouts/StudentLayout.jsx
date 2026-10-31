@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { notificationService } from '../services/notificationService';
+import { dashboardService } from '../services/dashboardService';
 import {
   GraduationCap,
   LayoutDashboard,
@@ -20,6 +21,7 @@ const StudentLayout = () => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [hasNewDrives, setHasNewDrives] = useState(false);
 
   // Coordinated notification polling and custom event listening
   useEffect(() => {
@@ -41,10 +43,35 @@ const StudentLayout = () => {
       }
     };
 
+    const checkDrivesWatermark = async () => {
+      if (!user?._id) return;
+      if (location.pathname === '/student/drives') {
+        setHasNewDrives(false);
+        return;
+      }
+      try {
+        const data = await dashboardService.getSummary();
+        if (isMounted && data.success && data.latestDriveCreatedAt) {
+          const watermark = localStorage.getItem(`cpms_drives_watermark_${user._id}`);
+          if (!watermark) {
+            setHasNewDrives(true);
+          } else {
+            setHasNewDrives(new Date(data.latestDriveCreatedAt).getTime() > new Date(watermark).getTime());
+          }
+        }
+      } catch (err) {
+        // Silently catch background watermark polling errors
+      }
+    };
+
     fetchUnreadCount();
+    checkDrivesWatermark();
 
     // 30s background badge polling interval
-    const intervalId = setInterval(fetchUnreadCount, 30000);
+    const intervalId = setInterval(() => {
+      fetchUnreadCount();
+      checkDrivesWatermark();
+    }, 30000);
 
     // Listen for real-time notification update events dispatched by NotificationsPage
     const handleNotificationUpdate = (e) => {
@@ -53,14 +80,23 @@ const StudentLayout = () => {
       }
     };
 
+    // Listen for drives watermark updates dispatched by DrivesPage
+    const handleWatermarkUpdate = (e) => {
+      if (isMounted) {
+        setHasNewDrives(!!e.detail?.hasNewDrives);
+      }
+    };
+
     window.addEventListener('cpms_notifications_updated', handleNotificationUpdate);
+    window.addEventListener('cpms_drives_watermark_updated', handleWatermarkUpdate);
 
     return () => {
       isMounted = false;
       clearInterval(intervalId);
       window.removeEventListener('cpms_notifications_updated', handleNotificationUpdate);
+      window.removeEventListener('cpms_drives_watermark_updated', handleWatermarkUpdate);
     };
-  }, [location.pathname]);
+  }, [location.pathname, user?._id]);
 
   const handleLogout = () => {
     logout();
@@ -69,10 +105,22 @@ const StudentLayout = () => {
 
   const navItems = [
     { label: 'Dashboard', path: '/student/dashboard', icon: LayoutDashboard },
-    { label: 'Placement Drives', path: '/student/drives', icon: Briefcase },
+    {
+      label: 'Placement Drives',
+      path: '/student/drives',
+      icon: Briefcase,
+      badge: hasNewDrives ? 'NEW' : null,
+      badgeColor: 'bg-emerald-600 text-white shadow-xs',
+    },
     { label: 'My Applications', path: '/student/applications', icon: FileCheck2 },
     { label: 'Profile', path: '/student/profile', icon: User },
-    { label: 'Notifications', path: '/student/notifications', icon: Bell, badge: unreadCount },
+    {
+      label: 'Notifications',
+      path: '/student/notifications',
+      icon: Bell,
+      badge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : null,
+      badgeColor: 'bg-indigo-600 text-white',
+    },
   ];
 
   return (
@@ -110,9 +158,9 @@ const StudentLayout = () => {
                   >
                     <Icon className="w-4 h-4" />
                     <span>{item.label}</span>
-                    {typeof item.badge === 'number' && item.badge > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold leading-none">
-                        {item.badge > 99 ? '99+' : item.badge}
+                    {item.badge && (
+                      <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none ${item.badgeColor || 'bg-indigo-600 text-white'}`}>
+                        {item.badge}
                       </span>
                     )}
                   </NavLink>
@@ -183,9 +231,9 @@ const StudentLayout = () => {
                 >
                   <Icon className="w-4 h-4" />
                   <span>{item.label}</span>
-                  {typeof item.badge === 'number' && item.badge > 0 && (
-                    <span className="ml-auto px-2 py-0.5 rounded-full bg-indigo-600 text-white text-xs font-bold leading-none">
-                      {item.badge > 99 ? '99+' : item.badge}
+                  {item.badge && (
+                    <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold leading-none ${item.badgeColor || 'bg-indigo-600 text-white'}`}>
+                      {item.badge}
                     </span>
                   )}
                 </NavLink>

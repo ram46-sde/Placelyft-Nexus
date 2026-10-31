@@ -3,6 +3,7 @@ const PlacementDrive = require('../models/PlacementDrive');
 const StudentProfile = require('../models/StudentProfile');
 const Company = require('../models/Company');
 const { checkEligibility } = require('../utils/eligibilityEngine');
+const { getDriveLifecycleStatus, isRegistrationDeadlinePassed } = require('../utils/driveLifecycle');
 
 // @desc    Apply for a placement drive
 // @route   POST /api/student/applications/:driveId
@@ -30,11 +31,30 @@ const applyForDrive = async (req, res, next) => {
         message: 'Unauthorized access to this placement drive.',
       });
     }
-    if (!drive.isActive) {
-      return res.status(400).json({ success: false, message: 'This placement drive is no longer active.' });
+
+    // Single source of truth lifecycle validation at write time
+    const derivedStatus = getDriveLifecycleStatus(drive);
+    if (derivedStatus === 'archived') {
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVE_ARCHIVED',
+        message: 'This placement drive has been archived and is no longer accepting applications.',
+      });
     }
-    if (new Date() > new Date(drive.registrationDeadline)) {
-      return res.status(400).json({ success: false, message: 'Registration deadline has passed.' });
+
+    if (derivedStatus === 'closed') {
+      if (isRegistrationDeadlinePassed(drive.registrationDeadline)) {
+        return res.status(400).json({
+          success: false,
+          code: 'DRIVE_CLOSED',
+          message: 'Registration deadline has passed. This placement drive is closed.',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVE_CLOSED',
+        message: 'This placement drive is closed and is no longer accepting applications.',
+      });
     }
 
     // 2. Check if student already applied

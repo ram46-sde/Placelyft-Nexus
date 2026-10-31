@@ -2,6 +2,7 @@ const PlacementDrive = require('../models/PlacementDrive');
 const DriveApplication = require('../models/DriveApplication');
 const StudentProfile = require('../models/StudentProfile');
 const { checkEligibility } = require('../utils/eligibilityEngine');
+const { getDriveLifecycleStatus, getDriveStatusQuery } = require('../utils/driveLifecycle');
 
 // @desc    Get aggregated metrics summary for the authenticated student's dashboard
 // @route   GET /api/student/dashboard/summary
@@ -30,17 +31,10 @@ const getStudentDashboardSummary = async (req, res, next) => {
     // 3. Fetch student's academic profile for eligibility evaluation
     const studentProfile = await StudentProfile.findOne({ user: studentId });
 
-    // 4. Query active and open placement drives strictly for this student's college
+    // 4. Query active and open placement drives strictly for this student's college (excluding archived/closed)
     const now = new Date();
-    const activeDrives = await PlacementDrive.find({
-      isActive: true,
-      collegeId: collegeId,
-      $or: [
-        { registrationDeadline: { $gte: now } },
-        { registrationDeadline: { $exists: false } },
-        { registrationDeadline: null },
-      ],
-    }).select('eligibilityCriteria');
+    const activeQuery = getDriveStatusQuery('active', collegeId, now);
+    const activeDrives = await PlacementDrive.find(activeQuery).select('eligibilityCriteria');
 
     // Calculate eligible drives using the existing eligibility engine
     let totalEligibleDrives = 0;
@@ -51,7 +45,38 @@ const getStudentDashboardSummary = async (req, res, next) => {
       }
     }
 
-    // 5. Query applications submitted by this student within their college
+    // 5. Fetch latest 3 active, non-archived drives strictly for this student's college, sorted by createdAt descending
+    const latestDrivesRaw = await PlacementDrive.find({
+      collegeId: collegeId,
+      isActive: true,
+      isArchived: false,
+    })
+      .populate('company', 'name logoUrl industry')
+      .sort({ createdAt: -1 })
+      .limit(3);
+
+    const latestDriveCreatedAt = latestDrivesRaw.length > 0 ? latestDrivesRaw[0].createdAt : null;
+
+    // Check application status for these latest drives
+    const latestDriveIds = latestDrivesRaw.map((d) => d._id);
+    const existingApps = await DriveApplication.find({
+      student: studentId,
+      placementDrive: { $in: latestDriveIds },
+    }).select('placementDrive');
+    const appliedDriveSet = new Set(existingApps.map((a) => a.placementDrive.toString()));
+
+    const latestDrives = latestDrivesRaw.map((drive) => {
+      const eligibility = checkEligibility(studentProfile, drive.eligibilityCriteria);
+      const hasApplied = appliedDriveSet.has(drive._id.toString());
+      return {
+        ...drive.toObject(),
+        status: getDriveLifecycleStatus(drive, now),
+        eligibility,
+        hasApplied,
+      };
+    });
+
+    // 6. Query applications submitted by this student within their college
     const applications = await DriveApplication.find({
       student: studentId,
     }).populate('placementDrive', 'collegeId');
@@ -88,6 +113,8 @@ const getStudentDashboardSummary = async (req, res, next) => {
         inProgressApplications,
         selectedApplications,
       },
+      latestDrives,
+      latestDriveCreatedAt,
     });
   } catch (error) {
     next(error);

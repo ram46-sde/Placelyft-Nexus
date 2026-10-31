@@ -24,4 +24,38 @@ export const officerService = {
     const response = await api.patch(`/officer/applications/${applicationId}/status`, { status });
     return response.data;
   },
+
+  // Archive a drive (hides from students, marks isActive: false)
+  archiveDrive: async (driveId) => {
+    const response = await api.patch(`/officer/drives/${driveId}/archive`);
+    return response.data;
+  },
+
+  // Restore an archived drive
+  restoreDrive: async (driveId) => {
+    const response = await api.patch(`/officer/drives/${driveId}/restore`);
+    return response.data;
+  },
+
+  // Permanently delete an archived drive with no dependent records
+  deleteDrive: async (driveId) => {
+    const response = await api.delete(`/officer/drives/${driveId}`);
+    return response.data;
+  },
+
+  // Department Management
+  getDepartments: async () => {
+    const response = await api.get('/officer/departments');
+    return response.data;
+  },
+
+  updateHodContact: async (deptId, contactData) => {
+    const response = await api.put(`/officer/departments/${deptId}/hod-contact`, contactData);
+    return response.data;
+  },
+
+  updateDepartmentAliases: async (deptId, aliases) => {
+    const response = await api.put(`/officer/departments/${deptId}/aliases`, { aliases });
+    return response.data;
+  },
 };

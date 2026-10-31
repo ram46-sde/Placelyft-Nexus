@@ -4,8 +4,9 @@ import { driveService } from '../../services/driveService';
 import { applicationService } from '../../services/applicationService';
 import { 
   Briefcase, Building2, Calendar, Clock, 
-  CheckCircle2, XCircle, ArrowLeft, Loader2, Info
+  CheckCircle2, XCircle, ArrowLeft, Loader2, Info, Archive
 } from 'lucide-react';
+import CompanyLocation from '../../components/common/CompanyLocation';
 
 const DriveDetailsPage = () => {
   const { id } = useParams();
@@ -100,6 +101,19 @@ const DriveDetailsPage = () => {
         <ArrowLeft className="w-4 h-4" /> Back to all drives
       </Link>
 
+      {/* Archived Read-Only Banner */}
+      {drive.isArchived && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-3 shadow-xs">
+          <Archive className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-bold text-sm">Placement Drive Archived (Read-Only)</h4>
+            <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+              This recruitment drive has been archived by the placement cell. Since you have already applied, your application history and drive details are preserved here in read-only mode. New applications are closed.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Card */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="h-32 bg-gradient-to-r from-indigo-900 to-slate-800"></div>
@@ -133,6 +147,9 @@ const DriveDetailsPage = () => {
                 <span><strong>Package:</strong> {drive.packageDetails}</span>
               </div>
             )}
+            <div className="flex items-center gap-2">
+              <CompanyLocation location={drive.companyLocation} className="inline-flex items-center gap-1.5 text-sm text-slate-600 min-w-0" iconClassName="w-5 h-5 text-slate-400 shrink-0" />
+            </div>
           </div>
         </div>
       </div>
@@ -197,8 +214,13 @@ const DriveDetailsPage = () => {
               </div>
             )}
 
-            {/* Application Button */}
-            {drive.hasApplied ? (
+            {/* Application Button / Archived Read-Only State */}
+            {drive.isArchived ? (
+              <div className="w-full py-3 px-4 rounded-xl font-semibold flex items-center justify-center gap-2 bg-slate-100 text-slate-700 border border-slate-200 mt-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <span>Applied & Archived (Read-Only)</span>
+              </div>
+            ) : drive.hasApplied ? (
               <div className="w-full py-3 px-4 rounded-xl font-semibold flex items-center justify-center gap-2 bg-emerald-100 text-emerald-700 mt-2">
                 <CheckCircle2 className="w-5 h-5" />
                 <span>Successfully Applied</span>
@@ -218,7 +240,7 @@ const DriveDetailsPage = () => {
               </button>
             )}
             
-            {!isEligible && !drive.hasApplied && (
+            {!drive.isArchived && !isEligible && !drive.hasApplied && (
               <p className="text-xs text-center text-slate-500 mt-3">
                 Update your <Link to="/student/profile" className="text-indigo-600 hover:underline">Student Profile</Link> if you believe this is incorrect.
               </p>

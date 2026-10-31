@@ -13,6 +13,7 @@ import {
   Calendar,
   Filter,
 } from 'lucide-react';
+import CompanyLocation from '../common/CompanyLocation';
 
 const ALLOWED_STATUSES = ['Applied', 'Shortlisted', 'Interviewing', 'Selected', 'Rejected'];
 
@@ -161,6 +162,11 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                   <Building2 className="w-3.5 h-3.5 text-emerald-400" />
                   {drive.company?.industry || 'Campus Recruitment'}
                 </span>
+                <CompanyLocation
+                  location={drive.companyLocation}
+                  className="inline-flex items-center gap-1 text-xs text-slate-300 min-w-0"
+                  iconClassName="w-3.5 h-3.5 text-emerald-400 shrink-0"
+                />
                 <span className="flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-emerald-400" />
                   Drive:{' '}

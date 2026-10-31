@@ -51,6 +51,18 @@ notificationSchema.index({ recipient: 1, collegeId: 1, createdAt: -1 });
 // Compound index for fast unread count and bulk read updates
 notificationSchema.index({ recipient: 1, collegeId: 1, isRead: 1 });
 
+// Partial unique compound index to ensure idempotent DRIVE_ANNOUNCEMENT delivery
+notificationSchema.index(
+  { recipient: 1, type: 1, placementDrive: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      type: 'DRIVE_ANNOUNCEMENT',
+      placementDrive: { $exists: true },
+    },
+  }
+);
+
 const Notification = mongoose.model('Notification', notificationSchema);
 
 module.exports = Notification;

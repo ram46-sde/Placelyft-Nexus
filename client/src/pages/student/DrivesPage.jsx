@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { driveService } from '../../services/driveService';
 import { Briefcase, Building2, Calendar, Search, ArrowRight, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import CompanyLocation from '../../components/common/CompanyLocation';
 
 const DrivesPage = () => {
+  const { user } = useAuth();
   const [drives, setDrives] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,6 +22,17 @@ const DrivesPage = () => {
       const res = await driveService.getAvailableDrives();
       if (res.success) {
         setDrives(res.drives || []);
+
+        // Update student watermark in localStorage to clear new-drive navigation badge
+        if (user?._id) {
+          const watermark = res.latestDriveCreatedAt || new Date().toISOString();
+          localStorage.setItem(`cpms_drives_watermark_${user._id}`, watermark);
+          window.dispatchEvent(
+            new CustomEvent('cpms_drives_watermark_updated', {
+              detail: { watermark, hasNewDrives: false },
+            })
+          );
+        }
       }
     } catch (error) {
       console.error('Error fetching drives:', error);
@@ -139,6 +153,8 @@ const DrivesPage = () => {
                       <span className="truncate">Package: <span className="font-medium text-slate-800">{drive.packageDetails}</span></span>
                     </div>
                   )}
+
+                  <CompanyLocation location={drive.companyLocation} className="flex items-center gap-2 text-sm text-slate-600 min-w-0" iconClassName="w-4 h-4 shrink-0 text-slate-400" />
 
                   {/* Eligibility Badge */}
                   <div className={`mt-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold w-fit border ${

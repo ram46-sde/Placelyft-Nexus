@@ -25,6 +25,10 @@ const placementDriveSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    companyLocation: {
+      type: String,
+      trim: true,
+    },
     driveDate: {
       type: Date,
       required: true,
@@ -36,6 +40,17 @@ const placementDriveSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    isArchived: {
+      type: Boolean,
+      default: false,
+    },
+    archivedAt: {
+      type: Date,
+    },
+    archivedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
     },
     eligibilityCriteria: {
       minCgpa: {

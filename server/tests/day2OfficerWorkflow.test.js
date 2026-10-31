@@ -369,6 +369,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
       const payload = {
         companyId: company._id.toString(),
         jobRole: 'Frontend Developer',
+        companyLocation: 'Bengaluru, Karnataka, India',
         jobDescription: 'Build modern React applications',
         packageDetails: '11 LPA',
         driveDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
@@ -406,6 +407,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         industry: 'Artificial Intelligence',
         website: 'https://vertex.example.com',
         jobRole: 'Machine Learning Engineer',
+        companyLocation: 'Hyderabad, Telangana, India',
         jobDescription: 'Train deep neural models',
         packageDetails: '18 LPA',
         driveDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString(),
@@ -449,6 +451,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         .send({
           companyId: company._id.toString(),
           jobRole: 'QA Engineer',
+          companyLocation: 'Chennai, Tamil Nadu, India',
           jobDescription: 'Test web software',
           driveDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
           registrationDeadline: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
@@ -466,6 +469,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         .send({
           companyId: company._id.toString(),
           jobRole: 'QA Engineer',
+          companyLocation: 'Chennai, Tamil Nadu, India',
           jobDescription: 'Test web software',
           driveDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
           registrationDeadline: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
@@ -485,6 +489,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         .send({
           companyId: nonExistentCompanyId.toString(),
           jobRole: 'DevOps Lead',
+          companyLocation: 'Chennai, Tamil Nadu, India',
           jobDescription: 'Manage cloud infrastructure',
           driveDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
           registrationDeadline: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
@@ -513,6 +518,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         .send({
           companyName: raceCompanyName,
           jobRole: 'Distributed Systems Engineer',
+          companyLocation: 'Bengaluru, Karnataka, India',
           jobDescription: 'Concurrency race condition recovery test',
           driveDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
           registrationDeadline: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
@@ -540,6 +546,7 @@ describe('Day 2 — Stage 1: Placement Officer Backend Workflow & Tenant Isolati
         companyId: company._id.toString(),
         collegeId: collegeBeta._id.toString(), // Client attempts to hijack/spoof College Beta
         jobRole: 'Spoof Attempt Role',
+        companyLocation: 'Bengaluru, Karnataka, India',
         jobDescription: 'Checking tenant isolation',
         driveDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
         registrationDeadline: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),

@@ -393,6 +393,7 @@ describe('Feature 3: Academic Eligibility Engine, Models, and APIs', () => {
     const baseDriveData = {
       companyName: 'Acme Cloud Solutions',
       jobRole: 'Cloud Engineer',
+      companyLocation: 'Pune, Maharashtra, India',
       jobDescription: 'Build backend microservices and cloud infrastructure.',
       driveDate: new Date(Date.now() + 86400000 * 7).toISOString(),
       registrationDeadline: new Date(Date.now() + 86400000 * 3).toISOString(),

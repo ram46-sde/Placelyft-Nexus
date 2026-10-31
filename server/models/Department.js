@@ -26,6 +26,36 @@ const departmentSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Optional HOD contact information
+    hodContact: {
+      type: {
+        name: {
+          type: String,
+          trim: true,
+        },
+        email: {
+          type: String,
+          trim: true,
+          lowercase: true,
+        },
+        phone: {
+          type: String,
+          trim: true,
+        },
+        officeLocation: {
+          type: String,
+          trim: true,
+        },
+      },
+      default: undefined,
+    },
+    // Optional aliases for robust department resolution
+    aliases: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
   },
   {
     timestamps: true,
