@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
 import {
   X,
@@ -12,6 +13,7 @@ import {
   Building2,
   Calendar,
   Filter,
+  ClipboardCheck,
 } from 'lucide-react';
 import CompanyLocation from '../common/CompanyLocation';
 
@@ -35,6 +37,7 @@ const getStatusBadgeClass = (status) => {
 };
 
 const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
+  const navigate = useNavigate();
   const [applicants, setApplicants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
@@ -184,13 +187,26 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
               </p>
             </div>
           </div>
-          <button
-            onClick={handleClose}
-            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
-            aria-label="Close modal"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                handleClose();
+                navigate(`/officer/drives/${drive._id}/attendance`, { state: { drive } });
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+              title="Open Drive Attendance Roster"
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              <span>Attendance</span>
+            </button>
+            <button
+              onClick={handleClose}
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Action feedback notifications */}

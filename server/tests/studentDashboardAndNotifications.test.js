@@ -437,7 +437,7 @@ describe('Feature 1: Student Dashboard Metrics & Persistent Notifications', () =
       expect(count).toBe(1);
     });
 
-    it('should rollback application status if notification creation throws an unexpected error', async () => {
+    it('should persist application status and return success with notificationCreated: false if notification creation throws an unexpected error', async () => {
       // Spy on Notification.create and simulate a DB write failure
       const createSpy = jest.spyOn(Notification, 'create').mockRejectedValueOnce(
         new Error('Simulated database write failure during notification generation')
@@ -448,13 +448,14 @@ describe('Feature 1: Student Dashboard Metrics & Persistent Notifications', () =
         .set('Authorization', `Bearer ${officerAlphaToken}`)
         .send({ status: 'Shortlisted' });
 
-      expect(res.status).toBe(500);
-      expect(res.body.success).toBe(false);
-      expect(res.body.message).toMatch(/rolled back/i);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.notificationCreated).toBe(false);
+      expect(res.body.application.status).toBe('Shortlisted');
 
-      // Verify compensating rollback: application status must still be 'Applied'
+      // Verify status persists: application status must be 'Shortlisted' without rollback
       const appInDb = await DriveApplication.findById(application._id);
-      expect(appInDb.status).toBe('Applied');
+      expect(appInDb.status).toBe('Shortlisted');
 
       createSpy.mockRestore();
     });

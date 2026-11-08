@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
 import CreateDriveModal from '../../components/officer/CreateDriveModal';
 import DriveApplicantsModal from '../../components/officer/DriveApplicantsModal';
-import DepartmentManagementSection from '../../components/officer/DepartmentManagementSection';
 import CompanyLocation from '../../components/common/CompanyLocation';
 import {
   Briefcase,
@@ -28,6 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   Trash2,
+  ClipboardCheck,
 } from 'lucide-react';
 
 /**
@@ -102,7 +102,7 @@ const OfficerDashboardPage = () => {
   const navigate = useNavigate();
 
   // State
-  const [activeTab, setActiveTab] = useState('drives'); // 'drives' | 'departments'
+  const [activeTab, setActiveTab] = useState('drives');
   const [drives, setDrives] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(''); // Only for page-level fetch errors
@@ -470,22 +470,9 @@ const OfficerDashboardPage = () => {
             <Briefcase className="w-4 h-4" />
             <span>Placement Drives</span>
           </button>
-          <button
-            onClick={() => setActiveTab('departments')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
-              activeTab === 'departments'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <Building2 className="w-4 h-4" />
-            <span>Department Management</span>
-          </button>
         </div>
 
-        {activeTab === 'departments' ? (
-          <DepartmentManagementSection />
-        ) : (
+        {activeTab === 'drives' && (
           <>
             {/* Page Title & Primary Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
@@ -940,6 +927,13 @@ const OfficerDashboardPage = () => {
                           >
                             <Users className="w-3.5 h-3.5" />
                             <span>View Applicants</span>
+                          </button>
+                          <button
+                            onClick={() => navigate(`/officer/drives/${drive._id}/attendance`, { state: { drive } })}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
+                          >
+                            <ClipboardCheck className="w-3.5 h-3.5" />
+                            <span>Attendance</span>
                           </button>
                         </>
                       )}

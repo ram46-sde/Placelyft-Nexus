@@ -1,0 +1,696 @@
+const mongoose = require('mongoose');
+const PlacementOutcome = require('../models/PlacementOutcome');
+const DriveApplication = require('../models/DriveApplication');
+const StudentProfile = require('../models/StudentProfile');
+const { resolveDepartment, fetchCollegeDepartments } = require('../utils/departmentResolver');
+
+/**
+ * Validates candidate CTC input according to Phase 4A specification:
+ * - JSON number, finite, greater than 0, at most 200, at most 2 decimals
+ * - Strings, NaN, Infinity, 0, and negatives rejected
+ * - undefined or null returns null (meaning "not specified")
+ * 
+ * @param {*} ctc 
+ * @returns {{ valid: boolean, parsedCtc?: number|null, error?: string }}
+ */
+function validateOfferPackageCtc(ctc) {
+  if (ctc === undefined || ctc === null) {
+    return { valid: true, parsedCtc: null };
+  }
+
+  if (typeof ctc !== 'number' || !Number.isFinite(ctc) || Number.isNaN(ctc)) {
+    return { valid: false, error: 'CTC must be a valid finite JSON number.' };
+  }
+
+  if (ctc <= 0) {
+    return { valid: false, error: 'CTC must be greater than 0.' };
+  }
+
+  if (ctc > 200) {
+    return { valid: false, error: 'CTC must be at most 200 LPA.' };
+  }
+
+  const ctcStr = ctc.toString();
+  if (ctcStr.includes('.')) {
+    const decimalPart = ctcStr.split('.')[1];
+    if (decimalPart && decimalPart.length > 2) {
+      return { valid: false, error: 'CTC can have at most 2 decimal places.' };
+    }
+  }
+
+  return { valid: true, parsedCtc: ctc };
+}
+
+/**
+ * Validates revocation reason according to Phase 4A specification:
+ * - Plain text string, trimmed, 10 to 500 characters
+ * 
+ * @param {*} reason 
+ * @returns {{ valid: boolean, trimmedReason?: string, error?: string }}
+ */
+function validateRevokeReason(reason) {
+  if (!reason || typeof reason !== 'string') {
+    return { valid: false, error: 'Revocation reason must be a plain text string.' };
+  }
+
+  const trimmed = reason.trim();
+  if (trimmed.length < 10) {
+    return { valid: false, error: 'Revocation reason must be at least 10 characters.' };
+  }
+
+  if (trimmed.length > 500) {
+    return { valid: false, error: 'Revocation reason cannot exceed 500 characters.' };
+  }
+
+  return { valid: true, trimmedReason: trimmed };
+}
+
+/**
+ * Strict whitelist presentation formatter for placement outcome responses.
+ * Guarantees that no student email, phone, CGPA, resume, or sensitive personal data is leaked.
+ * 
+ * Whitelist shape:
+ * { outcomeId, applicationId, status, verifiedAt, verifiedBy: { name }, offerPackage, departmentSnapshot, result }
+ * 
+ * @param {Object} doc Mongoose document or populated object
+ * @param {string} result Transition result
+ * @returns {Object} Whitelisted presentation object
+ */
+function formatOutcomeResponse(doc, result) {
+  if (!doc) return null;
+
+  let officerName = 'Placement Officer';
+  if (doc.verifiedBy) {
+    if (typeof doc.verifiedBy === 'object' && doc.verifiedBy.name) {
+      officerName = doc.verifiedBy.name;
+    } else if (doc.verifiedByName) {
+      officerName = doc.verifiedByName;
+    }
+  }
+
+  return {
+    outcomeId: doc._id ? doc._id.toString() : null,
+    applicationId: doc.application
+      ? (doc.application._id ? doc.application._id.toString() : doc.application.toString())
+      : null,
+    status: doc.status,
+    verifiedAt: doc.verifiedAt ? new Date(doc.verifiedAt).toISOString() : null,
+    verifiedBy: doc.verifiedBy ? { name: officerName } : null,
+    offerPackage: {
+      ctc: doc.offerPackage && doc.offerPackage.ctc !== undefined ? doc.offerPackage.ctc : null,
+      unit: (doc.offerPackage && doc.offerPackage.unit) || 'LPA',
+      currency: (doc.offerPackage && doc.offerPackage.currency) || 'INR',
+    },
+    departmentSnapshot: {
+      departmentId: doc.departmentSnapshot && doc.departmentSnapshot.departmentId
+        ? doc.departmentSnapshot.departmentId.toString()
+        : null,
+      departmentName: (doc.departmentSnapshot && doc.departmentSnapshot.departmentName) || 'Unassigned / Other',
+      departmentCode: (doc.departmentSnapshot && doc.departmentSnapshot.departmentCode) || null,
+      resolutionStatus: (doc.departmentSnapshot && doc.departmentSnapshot.resolutionStatus) || 'unassigned',
+    },
+    result,
+  };
+}
+
+/**
+ * Centralized mutation service function for placement outcomes.
+ * Single entry point for all outcome state transitions: verify, already_verified, reverify, revoke, already_revoked.
+ * Strictly guarantees that no code path may replace, truncate, or edit history.
+ * 
+ * @param {Object} params
+ * @param {'verify'|'revoke'} params.action Action to perform
+ * @param {string|mongoose.Types.ObjectId} params.applicationId
+ * @param {string|mongoose.Types.ObjectId} params.collegeId
+ * @param {Object} params.officerUser Authenticated officer user
+ * @param {number} [params.ctc] Offer package CTC in LPA (for verify)
+ * @param {string} [params.reason] Revocation reason (for revoke)
+ * @returns {Promise<{ status: number, data?: Object, error?: Object }>}
+ */
+async function mutateOutcomeService({
+  action,
+  applicationId,
+  collegeId,
+  officerUser,
+  ctc,
+  reason,
+}) {
+  if (!applicationId || !mongoose.Types.ObjectId.isValid(applicationId)) {
+    return {
+      status: 400,
+      error: { code: 'INVALID_APPLICATION_ID', message: 'Invalid application ID format.' },
+    };
+  }
+
+  let claimedLock = false;
+
+  if (action === 'verify') {
+    // 1. Validate CTC parameter
+    const ctcCheck = validateOfferPackageCtc(ctc);
+    if (!ctcCheck.valid) {
+      return {
+        status: 400,
+        error: { code: 'INVALID_CTC', message: ctcCheck.error },
+      };
+    }
+    const parsedCtc = ctcCheck.parsedCtc;
+
+    // 2. Atomic claim on DriveApplication: claim lock only if Selected and not already verified
+    const claimResult = await DriveApplication.updateOne(
+      {
+        _id: applicationId,
+        collegeId,
+        status: 'Selected',
+        outcomeVerified: { $ne: true },
+      },
+      {
+        $set: { outcomeVerified: true },
+      }
+    );
+
+    claimedLock = claimResult.matchedCount === 1;
+
+    let application;
+    if (claimedLock) {
+      application = await DriveApplication.findOne({ _id: applicationId, collegeId });
+    } else {
+      // Did not match: re-read and classify
+      application = await DriveApplication.findOne({ _id: applicationId, collegeId });
+      if (!application) {
+        return {
+          status: 404,
+          error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found.' },
+        };
+      }
+      if (application.status !== 'Selected') {
+        return {
+          status: 400,
+          error: {
+            code: 'APPLICATION_NOT_SELECTED',
+            message: 'Only applications with status "Selected" can be verified as placement outcomes.',
+          },
+        };
+      }
+      // If status is 'Selected', already locked (outcomeVerified === true) -> continue into idempotent path
+    }
+
+    try {
+      // 3. Compute Department Snapshot via pure function
+      const departments = await fetchCollegeDepartments(collegeId);
+      const profile = await StudentProfile.findOne({
+        user: application.student,
+        collegeId,
+      }).lean();
+
+      const resolved = resolveDepartment(profile, departments);
+      const departmentSnapshot = {
+        departmentId: resolved.departmentId || null,
+        departmentName: resolved.departmentName,
+        departmentCode: resolved.departmentCode || null,
+        resolutionStatus: resolved.status,
+      };
+
+      // 4. Look up existing outcome
+      let existing = await PlacementOutcome.findOne({
+        application: applicationId,
+        collegeId,
+      });
+
+      const serverTime = new Date();
+
+      if (!existing) {
+        // Case A: No existing record -> First verification via upsert with $setOnInsert
+        const firstHistoryEntry = {
+          action: 'verified',
+          oldStatus: null,
+          newStatus: 'verified',
+          changedBy: officerUser._id,
+          changedAt: serverTime,
+          reason: null,
+          ctc: parsedCtc,
+        };
+
+        const createdRecord = await PlacementOutcome.findOneAndUpdate(
+          { application: applicationId },
+          {
+            $setOnInsert: {
+              collegeId,
+              placementDrive: application.placementDrive,
+              application: applicationId,
+              student: application.student,
+              status: 'verified',
+              verifiedBy: officerUser._id,
+              verifiedAt: serverTime,
+              departmentSnapshot,
+              offerPackage: {
+                ctc: parsedCtc,
+                unit: 'LPA',
+                currency: 'INR',
+              },
+              history: [firstHistoryEntry],
+            },
+          },
+          { upsert: true, new: false } // returns null if inserted
+        );
+
+        if (!createdRecord) {
+          // Successfully created first verification
+          const inserted = await PlacementOutcome.findOne({ application: applicationId }).populate(
+            'verifiedBy',
+            'name'
+          );
+          return {
+            status: 200,
+            data: formatOutcomeResponse(inserted, 'created'),
+          };
+        } else {
+          // Existed concurrently; reload and fall through to existing logic
+          existing = createdRecord;
+        }
+      }
+
+      // Case B: Existing record exists
+      if (existing) {
+        if (existing.status === 'verified') {
+          const currentCtc = existing.offerPackage ? existing.offerPackage.ctc : null;
+
+          // Same CTC or CTC omitted: idempotent no-op (no change, no history)
+          if (parsedCtc === null || parsedCtc === currentCtc) {
+            // Self-heal: ensure flag is set if missing on legacy outcome
+            await DriveApplication.updateOne(
+              { _id: applicationId, collegeId },
+              { $set: { outcomeVerified: true } }
+            );
+
+            const populated = await PlacementOutcome.findById(existing._id).populate(
+              'verifiedBy',
+              'name'
+            );
+            return {
+              status: 200,
+              data: formatOutcomeResponse(populated, 'already_verified'),
+            };
+          }
+
+          // Different CTC supplied: 409 OUTCOME_PACKAGE_MISMATCH (outcome stays verified, flag stays set)
+          return {
+            status: 409,
+            error: {
+              code: 'OUTCOME_PACKAGE_MISMATCH',
+              message:
+                'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
+            },
+          };
+        }
+
+        if (existing.status === 'revoked') {
+          // Re-verification of revoked outcome using Compare-and-Set
+          const reverifyHistoryEntry = {
+            action: 'reverified',
+            oldStatus: 'revoked',
+            newStatus: 'verified',
+            changedBy: officerUser._id,
+            changedAt: serverTime,
+            reason: null,
+            ctc: parsedCtc,
+          };
+
+          const updated = await PlacementOutcome.findOneAndUpdate(
+            {
+              _id: existing._id,
+              application: applicationId,
+              collegeId,
+              status: 'revoked', // CAS condition
+            },
+            {
+              $set: {
+                status: 'verified',
+                departmentSnapshot, // fresh snapshot on reverification
+                verifiedBy: officerUser._id,
+                verifiedAt: serverTime,
+                offerPackage: {
+                  ctc: parsedCtc,
+                  unit: 'LPA',
+                  currency: 'INR',
+                },
+              },
+              $push: {
+                history: reverifyHistoryEntry,
+              },
+            },
+            { new: true }
+          ).populate('verifiedBy', 'name');
+
+          if (updated) {
+            return {
+              status: 200,
+              data: formatOutcomeResponse(updated, 'reverified'),
+            };
+          }
+
+          // CAS condition failed due to concurrent modification; re-read and retry once
+          const reRead = await PlacementOutcome.findOne({
+            application: applicationId,
+            collegeId,
+          });
+
+          if (!reRead) {
+            return {
+              status: 404,
+              error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
+            };
+          }
+
+          if (reRead.status === 'verified') {
+            const currentCtc = reRead.offerPackage ? reRead.offerPackage.ctc : null;
+            if (parsedCtc === null || parsedCtc === currentCtc) {
+              await DriveApplication.updateOne(
+                { _id: applicationId, collegeId },
+                { $set: { outcomeVerified: true } }
+              );
+              const populated = await PlacementOutcome.findById(reRead._id).populate(
+                'verifiedBy',
+                'name'
+              );
+              return {
+                status: 200,
+                data: formatOutcomeResponse(populated, 'already_verified'),
+              };
+            } else {
+              return {
+                status: 409,
+                error: {
+                  code: 'OUTCOME_PACKAGE_MISMATCH',
+                  message:
+                    'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
+                },
+              };
+            }
+          }
+
+          // Re-attempt CAS once against revoked status
+          const retryTime = new Date();
+          reverifyHistoryEntry.changedAt = retryTime;
+
+          const retryUpdated = await PlacementOutcome.findOneAndUpdate(
+            {
+              _id: reRead._id,
+              application: applicationId,
+              collegeId,
+              status: 'revoked',
+            },
+            {
+              $set: {
+                status: 'verified',
+                departmentSnapshot,
+                verifiedBy: officerUser._id,
+                verifiedAt: retryTime,
+                offerPackage: {
+                  ctc: parsedCtc,
+                  unit: 'LPA',
+                  currency: 'INR',
+                },
+              },
+              $push: {
+                history: reverifyHistoryEntry,
+              },
+            },
+            { new: true }
+          ).populate('verifiedBy', 'name');
+
+          if (retryUpdated) {
+            return {
+              status: 200,
+              data: formatOutcomeResponse(retryUpdated, 'reverified'),
+            };
+          }
+
+          // If retry CAS fails, compensate if this request claimed the lock
+          if (claimedLock) {
+            try {
+              await DriveApplication.updateOne(
+                { _id: applicationId, collegeId },
+                { $set: { outcomeVerified: false } }
+              );
+            } catch (compErr) {
+              console.error('[Lock Compensation Failure]:', compErr.message);
+            }
+          }
+
+          return {
+            status: 409,
+            error: {
+              code: 'CONCURRENT_MODIFICATION',
+              message: 'Concurrent update conflict during reverification. Please try again.',
+            },
+          };
+        }
+      }
+    } catch (outcomeErr) {
+      // If this request claimed the lock and outcome step failed, compensate by clearing flag
+      if (claimedLock) {
+        try {
+          await DriveApplication.updateOne(
+            { _id: applicationId, collegeId },
+            { $set: { outcomeVerified: false } }
+          );
+        } catch (compensationErr) {
+          console.error('[Lock Compensation Failure]: Failed to release lock after outcome error:', compensationErr.message);
+          // Leave it locked (fail-safe)
+        }
+      }
+      return {
+        status: 500,
+        error: { code: 'OUTCOME_STEP_FAILED', message: outcomeErr.message },
+      };
+    }
+  }
+
+  if (action === 'revoke') {
+    // 1. Validate revocation reason
+    const reasonCheck = validateRevokeReason(reason);
+    if (!reasonCheck.valid) {
+      return {
+        status: 400,
+        error: { code: 'INVALID_REVOKE_REASON', message: reasonCheck.error },
+      };
+    }
+    const trimmedReason = reasonCheck.trimmedReason;
+
+    // 2. Scoped lookup: { application, collegeId }
+    let existing = await PlacementOutcome.findOne({
+      application: applicationId,
+      collegeId,
+    });
+
+    if (!existing) {
+      return {
+        status: 404,
+        error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
+      };
+    }
+
+    // 3. Already revoked: idempotent response, still ensure flag is cleared (idempotent repair)
+    if (existing.status === 'revoked') {
+      await DriveApplication.updateOne(
+        { _id: applicationId, collegeId },
+        { $set: { outcomeVerified: false } }
+      );
+
+      const populated = await PlacementOutcome.findById(existing._id).populate('verifiedBy', 'name');
+      return {
+        status: 200,
+        data: formatOutcomeResponse(populated, 'already_revoked'),
+      };
+    }
+
+    // 4. Currently verified: execute CAS update to revoked FIRST
+    const serverTime = new Date();
+    const revokeHistoryEntry = {
+      action: 'revoked',
+      oldStatus: 'verified',
+      newStatus: 'revoked',
+      changedBy: officerUser._id,
+      changedAt: serverTime,
+      reason: trimmedReason,
+      ctc: null,
+    };
+
+    const updated = await PlacementOutcome.findOneAndUpdate(
+      {
+        _id: existing._id,
+        application: applicationId,
+        collegeId,
+        status: 'verified', // CAS condition
+      },
+      {
+        $set: {
+          status: 'revoked',
+        },
+        $push: {
+          history: revokeHistoryEntry,
+        },
+      },
+      { new: true }
+    ).populate('verifiedBy', 'name');
+
+    if (updated) {
+      // THEN clear the flag
+      await DriveApplication.updateOne(
+        { _id: applicationId, collegeId },
+        { $set: { outcomeVerified: false } }
+      );
+
+      return {
+        status: 200,
+        data: formatOutcomeResponse(updated, 'revoked'),
+      };
+    }
+
+    // CAS failed due to concurrent modification; re-read and retry once
+    const reRead = await PlacementOutcome.findOne({
+      application: applicationId,
+      collegeId,
+    });
+
+    if (!reRead) {
+      return {
+        status: 404,
+        error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
+      };
+    }
+
+    if (reRead.status === 'revoked') {
+      // Concurrently revoked: ensure flag is cleared and return idempotent already_revoked
+      await DriveApplication.updateOne(
+        { _id: applicationId, collegeId },
+        { $set: { outcomeVerified: false } }
+      );
+
+      const populated = await PlacementOutcome.findById(reRead._id).populate('verifiedBy', 'name');
+      return {
+        status: 200,
+        data: formatOutcomeResponse(populated, 'already_revoked'),
+      };
+    }
+
+    // Retry CAS once against verified
+    const retryTime = new Date();
+    revokeHistoryEntry.changedAt = retryTime;
+
+    const retryUpdated = await PlacementOutcome.findOneAndUpdate(
+      {
+        _id: reRead._id,
+        application: applicationId,
+        collegeId,
+        status: 'verified',
+      },
+      {
+        $set: {
+          status: 'revoked',
+        },
+        $push: {
+          history: revokeHistoryEntry,
+        },
+      },
+      { new: true }
+    ).populate('verifiedBy', 'name');
+
+    if (retryUpdated) {
+      // Clear flag after successful CAS update
+      await DriveApplication.updateOne(
+        { _id: applicationId, collegeId },
+        { $set: { outcomeVerified: false } }
+      );
+
+      return {
+        status: 200,
+        data: formatOutcomeResponse(retryUpdated, 'revoked'),
+      };
+    }
+
+    return {
+      status: 409,
+      error: {
+        code: 'CONCURRENT_MODIFICATION',
+        message: 'Concurrent update conflict during revocation. Please try again.',
+      },
+    };
+  }
+
+  return {
+    status: 400,
+    error: { code: 'INVALID_ACTION', message: `Action '${action}' is not supported.` },
+  };
+}
+
+/**
+ * Service function to retrieve chronological audit history for a placement outcome.
+ * Returns chronological history with the officer's name only for changedBy.
+ * 
+ * @param {Object} params
+ * @param {string|mongoose.Types.ObjectId} params.applicationId
+ * @param {string|mongoose.Types.ObjectId} params.collegeId
+ * @returns {Promise<{ status: number, data?: Object, error?: Object }>}
+ */
+async function getOutcomeHistoryService({ applicationId, collegeId }) {
+  if (!applicationId || !mongoose.Types.ObjectId.isValid(applicationId)) {
+    return {
+      status: 400,
+      error: { code: 'INVALID_APPLICATION_ID', message: 'Invalid application ID format.' },
+    };
+  }
+
+  const outcome = await PlacementOutcome.findOne({
+    application: applicationId,
+    collegeId,
+  }).populate({
+    path: 'history.changedBy',
+    select: 'name',
+  });
+
+  if (!outcome) {
+    return {
+      status: 404,
+      error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
+    };
+  }
+
+  const history = Array.isArray(outcome.history)
+    ? outcome.history.map((h) => {
+        const officerName =
+          h.changedBy && typeof h.changedBy === 'object' && h.changedBy.name
+            ? h.changedBy.name
+            : 'Placement Officer';
+
+        return {
+          action: h.action,
+          oldStatus: h.oldStatus,
+          newStatus: h.newStatus,
+          changedBy: { name: officerName },
+          changedAt: h.changedAt ? new Date(h.changedAt).toISOString() : null,
+          reason: h.reason,
+          ctc: h.ctc,
+        };
+      })
+    : [];
+
+  return {
+    status: 200,
+    data: {
+      outcomeId: outcome._id.toString(),
+      applicationId: outcome.application.toString(),
+      history,
+    },
+  };
+}
+
+module.exports = {
+  mutateOutcomeService,
+  verifyOutcomeService: (params) => mutateOutcomeService({ ...params, action: 'verify' }),
+  revokeOutcomeService: (params) => mutateOutcomeService({ ...params, action: 'revoke' }),
+  getOutcomeHistoryService,
+  formatOutcomeResponse,
+  validateOfferPackageCtc,
+  validateRevokeReason,
+};

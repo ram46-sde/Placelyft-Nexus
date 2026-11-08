@@ -18,6 +18,11 @@ const {
   getDriveAttendance,
   markDriveAttendance,
 } = require('../controllers/driveAttendanceController');
+const {
+  verifyOutcome,
+  revokeOutcome,
+  getOutcomeHistory,
+} = require('../controllers/placementOutcomeController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 // All officer routes require valid JWT authentication and placement_officer role
@@ -44,4 +49,10 @@ router.post('/drives/:id/attendance/mark', markDriveAttendance);
 // Application Status Management
 router.patch('/applications/:id/status', updateApplicationStatus);
 
+// Placement Outcome Management
+router.post('/outcomes/:applicationId/verify', verifyOutcome);
+router.post('/outcomes/:applicationId/revoke', revokeOutcome);
+router.get('/outcomes/:applicationId/history', getOutcomeHistory);
+
 module.exports = router;
+

@@ -3,11 +3,13 @@ const PlacementDrive = require('../models/PlacementDrive');
 const Company = require('../models/Company');
 const DriveApplication = require('../models/DriveApplication');
 const DriveAttendance = require('../models/DriveAttendance');
+const PlacementOutcome = require('../models/PlacementOutcome');
 const StudentProfile = require('../models/StudentProfile');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { resolveUgBasis } = require('../utils/eligibilityEngine');
 const { getDriveLifecycleStatus } = require('../utils/driveLifecycle');
+const { changeApplicationStatus } = require('../services/applicationStatusService');
 
 /**
  * Shared registry of placement drive dependent records.
@@ -22,6 +24,11 @@ const DRIVE_DEPENDENTS = [
   {
     model: DriveAttendance,
     name: 'attendance record',
+    query: (driveId) => ({ placementDrive: driveId }),
+  },
+  {
+    model: PlacementOutcome,
+    name: 'placement outcome',
     query: (driveId) => ({ placementDrive: driveId }),
   },
 ];
@@ -791,63 +798,22 @@ const updateApplicationStatus = async (req, res, next) => {
         message: 'Unauthorized: Cannot update application status for a drive outside your college.',
       });
     }
-
-    // Duplicate prevention: if status has not changed, do not create duplicate notification
-    if (application.status === status) {
-      return res.status(200).json({
-        success: true,
-        message: `Application status is already ${status}.`,
-        application,
-      });
-    }
-
-    const previousStatus = application.status;
-    application.status = status;
-    await application.save();
-
-    // Create persistent notification for the affected student
-    try {
-      const jobRole = (application.placementDrive && application.placementDrive.jobRole) || 'Placement Drive';
-      const companyName =
-        (application.placementDrive &&
-          application.placementDrive.company &&
-          application.placementDrive.company.name) ||
-        'Company';
-      const studentId = application.student ? (application.student._id || application.student) : null;
-
-      if (studentId) {
-        // Enforce tenant integrity: recipient must match officer's college
-        const studentCollegeId = application.student.collegeId || applicationCollegeId;
-        if (studentCollegeId && studentCollegeId.toString() === req.user.collegeId.toString()) {
-          await Notification.create({
-            recipient: studentId,
-            collegeId: req.user.collegeId,
-            title: `Application Status Updated: ${jobRole}`,
-            message: `Your application for ${jobRole} at ${companyName} has been updated to "${status}".`,
-            type: 'STATUS_UPDATE',
-            placementDrive: application.placementDrive ? application.placementDrive._id : undefined,
-            application: application._id,
-            isRead: false,
-          });
-        }
-      }
-    } catch (notificationError) {
-      console.error('[Notification Creation Error]:', notificationError.message);
-      // Compensating rollback for database consistency if notification creation fails
-      application.status = previousStatus;
-      await application.save();
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to record notification for status update. Status change was rolled back.',
-        error: notificationError.message,
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: `Application status updated to ${status}.`,
-      application,
+    // Route status update through the single choke point (Phase 4B Verified Outcome Integrity)
+    const result = await changeApplicationStatus({
+      applicationId: id,
+      collegeId: req.user.collegeId,
+      status,
+      officerUser: req.user,
     });
+
+    if (result.error) {
+      return res.status(result.status).json({
+        success: false,
+        ...result.error,
+      });
+    }
+
+    res.status(result.status).json(result.data);
   } catch (error) {
     next(error);
   }

@@ -14,6 +14,7 @@ import RecruiterLoginPage from './pages/auth/RecruiterLoginPage';
 
 // Placement Officer Portal Pages
 import OfficerDashboardPage from './pages/officer/OfficerDashboardPage';
+import DriveAttendancePage from './pages/officer/DriveAttendancePage';
 
 // Student Portal Pages
 import DashboardPage from './pages/student/DashboardPage';
@@ -46,6 +47,7 @@ function App() {
           <Route path="/officer" element={<ProtectedRoute allowedRoles={['placement_officer']} loginPath="/placement-officer/login" />}>
             <Route index element={<Navigate to="/officer/dashboard" replace />} />
             <Route path="dashboard" element={<OfficerDashboardPage />} />
+            <Route path="drives/:id/attendance" element={<DriveAttendancePage />} />
           </Route>
           <Route path="/placement-officer/dashboard" element={<Navigate to="/officer/dashboard" replace />} />
 

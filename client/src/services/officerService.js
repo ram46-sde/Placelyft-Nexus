@@ -58,4 +58,16 @@ export const officerService = {
     const response = await api.put(`/officer/departments/${deptId}/aliases`, { aliases });
     return response.data;
   },
+
+  // Drive Attendance
+  getDriveAttendance: async (driveId, { includeHistory = false } = {}) => {
+    const params = includeHistory ? '?includeHistory=true' : '';
+    const response = await api.get(`/officer/drives/${driveId}/attendance${params}`);
+    return response.data;
+  },
+
+  markDriveAttendance: async (driveId, entries) => {
+    const response = await api.post(`/officer/drives/${driveId}/attendance/mark`, { entries });
+    return response.data;
+  },
 };

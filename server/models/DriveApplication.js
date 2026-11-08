@@ -22,6 +22,10 @@ const driveApplicationSchema = new mongoose.Schema(
       enum: ['Applied', 'Shortlisted', 'Interviewing', 'Selected', 'Rejected'],
       default: 'Applied',
     },
+    // Additive outcome lock guard field (Phase 4B): absent means false, queries use { $ne: true }
+    outcomeVerified: {
+      type: Boolean,
+    },
   },
   {
     timestamps: true,
