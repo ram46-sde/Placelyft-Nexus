@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const PlacementOutcome = require('../models/PlacementOutcome');
 const DriveApplication = require('../models/DriveApplication');
 const StudentProfile = require('../models/StudentProfile');
+const PlacementDrive = require('../models/PlacementDrive');
+const Notification = require('../models/Notification');
 const { resolveDepartment, fetchCollegeDepartments } = require('../utils/departmentResolver');
 
 /**
@@ -76,7 +78,7 @@ function validateRevokeReason(reason) {
  * @param {string} result Transition result
  * @returns {Object} Whitelisted presentation object
  */
-function formatOutcomeResponse(doc, result) {
+function formatOutcomeResponse(doc, result, notificationCreated) {
   if (!doc) return null;
 
   let officerName = 'Placement Officer';
@@ -88,7 +90,7 @@ function formatOutcomeResponse(doc, result) {
     }
   }
 
-  return {
+  const response = {
     outcomeId: doc._id ? doc._id.toString() : null,
     applicationId: doc.application
       ? (doc.application._id ? doc.application._id.toString() : doc.application.toString())
@@ -111,6 +113,102 @@ function formatOutcomeResponse(doc, result) {
     },
     result,
   };
+
+  if (notificationCreated !== undefined) {
+    response.notificationCreated = notificationCreated;
+  }
+
+  return response;
+}
+
+/**
+ * Dispatches point-in-time OUTCOME_VERIFIED notification with strict idempotent eventKey.
+ * Post-commit guarded block: never throws or disrupts verified outcome mutation.
+ *
+ * @param {Object} params
+ * @param {mongoose.Types.ObjectId|string} params.outcomeId
+ * @param {mongoose.Types.ObjectId|string} params.eventId
+ * @param {mongoose.Types.ObjectId|string} params.studentId
+ * @param {mongoose.Types.ObjectId|string} params.collegeId
+ * @param {mongoose.Types.ObjectId|string} [params.placementDriveId]
+ * @param {mongoose.Types.ObjectId|string} [params.applicationId]
+ * @param {Date|string} [params.verifiedAt]
+ * @returns {Promise<{ success: boolean, notificationCreated: boolean, duplicate?: boolean }>}
+ */
+async function dispatchOutcomeVerifiedNotification({
+  outcomeId,
+  eventId,
+  studentId,
+  collegeId,
+  placementDriveId,
+  applicationId,
+  verifiedAt,
+}) {
+  if (!outcomeId || !eventId || !studentId || !collegeId) {
+    return { success: false, notificationCreated: false };
+  }
+
+  const eventKey = `outcome_verified:${outcomeId}:${eventId}`;
+
+  try {
+    let companyName = 'Company';
+    let jobRole = 'Role';
+
+    if (placementDriveId) {
+      const drive = await PlacementDrive.findById(placementDriveId)
+        .populate('company', 'name')
+        .select('jobRole company');
+      if (drive) {
+        jobRole = drive.jobRole || 'Role';
+        if (drive.company && drive.company.name) {
+          companyName = drive.company.name;
+        }
+      }
+    }
+
+    const dateStr = new Date(verifiedAt || Date.now()).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const title = 'Placement Outcome Verified';
+    const message = `Your placement outcome for ${companyName} (${jobRole}) was verified on ${dateStr}.`;
+
+    await Notification.create({
+      recipient: studentId,
+      collegeId,
+      title,
+      message,
+      type: 'OUTCOME_VERIFIED',
+      placementDrive: placementDriveId || undefined,
+      application: applicationId || undefined,
+      eventKey,
+      isRead: false,
+    });
+
+    return { success: true, notificationCreated: true };
+  } catch (notifErr) {
+    // Duplicate-key error on eventKey: already created, treat as success, do not log as failure
+    if (
+      notifErr.code === 11000 &&
+      (notifErr.keyPattern?.eventKey ||
+        (notifErr.message && notifErr.message.includes('eventKey')))
+    ) {
+      return { success: true, notificationCreated: true, duplicate: true };
+    }
+
+    console.error('[Notification Dispatch Failure]:', {
+      outcomeId: outcomeId ? outcomeId.toString() : null,
+      collegeId: collegeId ? collegeId.toString() : null,
+      type: 'OUTCOME_VERIFIED',
+      errorName: notifErr.name || 'Error',
+      errorCode: notifErr.code || null,
+      errorMessage: (notifErr.message || '').substring(0, 200),
+    });
+
+    return { success: false, notificationCreated: false };
+  }
 }
 
 /**
@@ -220,7 +318,9 @@ async function mutateOutcomeService({
 
       if (!existing) {
         // Case A: No existing record -> First verification via upsert with $setOnInsert
+        const eventId = new mongoose.Types.ObjectId();
         const firstHistoryEntry = {
+          eventId,
           action: 'verified',
           oldStatus: null,
           newStatus: 'verified',
@@ -259,9 +359,34 @@ async function mutateOutcomeService({
             'verifiedBy',
             'name'
           );
+
+          // Post-commit guarded block: dispatch OUTCOME_VERIFIED notification
+          let notificationCreated = false;
+          try {
+            const notifRes = await dispatchOutcomeVerifiedNotification({
+              outcomeId: inserted._id,
+              eventId,
+              studentId: inserted.student,
+              collegeId: inserted.collegeId,
+              placementDriveId: inserted.placementDrive,
+              applicationId,
+              verifiedAt: serverTime,
+            });
+            notificationCreated = !!notifRes.notificationCreated;
+          } catch (postCommitErr) {
+            console.error('[Notification Dispatch Failure]:', {
+              outcomeId: inserted._id ? inserted._id.toString() : null,
+              collegeId: collegeId ? collegeId.toString() : null,
+              type: 'OUTCOME_VERIFIED',
+              errorName: postCommitErr.name || 'Error',
+              errorCode: postCommitErr.code || null,
+              errorMessage: (postCommitErr.message || '').substring(0, 200),
+            });
+          }
+
           return {
             status: 200,
-            data: formatOutcomeResponse(inserted, 'created'),
+            data: formatOutcomeResponse(inserted, 'created', notificationCreated),
           };
         } else {
           // Existed concurrently; reload and fall through to existing logic
@@ -288,7 +413,7 @@ async function mutateOutcomeService({
             );
             return {
               status: 200,
-              data: formatOutcomeResponse(populated, 'already_verified'),
+              data: formatOutcomeResponse(populated, 'already_verified', false),
             };
           }
 
@@ -305,7 +430,9 @@ async function mutateOutcomeService({
 
         if (existing.status === 'revoked') {
           // Re-verification of revoked outcome using Compare-and-Set
+          const eventId = new mongoose.Types.ObjectId();
           const reverifyHistoryEntry = {
+            eventId,
             action: 'reverified',
             oldStatus: 'revoked',
             newStatus: 'verified',
@@ -342,9 +469,32 @@ async function mutateOutcomeService({
           ).populate('verifiedBy', 'name');
 
           if (updated) {
+            let notificationCreated = false;
+            try {
+              const notifRes = await dispatchOutcomeVerifiedNotification({
+                outcomeId: updated._id,
+                eventId,
+                studentId: updated.student,
+                collegeId: updated.collegeId,
+                placementDriveId: updated.placementDrive,
+                applicationId,
+                verifiedAt: serverTime,
+              });
+              notificationCreated = !!notifRes.notificationCreated;
+            } catch (postCommitErr) {
+              console.error('[Notification Dispatch Failure]:', {
+                outcomeId: updated._id ? updated._id.toString() : null,
+                collegeId: collegeId ? collegeId.toString() : null,
+                type: 'OUTCOME_VERIFIED',
+                errorName: postCommitErr.name || 'Error',
+                errorCode: postCommitErr.code || null,
+                errorMessage: (postCommitErr.message || '').substring(0, 200),
+              });
+            }
+
             return {
               status: 200,
-              data: formatOutcomeResponse(updated, 'reverified'),
+              data: formatOutcomeResponse(updated, 'reverified', notificationCreated),
             };
           }
 
@@ -374,7 +524,7 @@ async function mutateOutcomeService({
               );
               return {
                 status: 200,
-                data: formatOutcomeResponse(populated, 'already_verified'),
+                data: formatOutcomeResponse(populated, 'already_verified', false),
               };
             } else {
               return {
@@ -419,9 +569,32 @@ async function mutateOutcomeService({
           ).populate('verifiedBy', 'name');
 
           if (retryUpdated) {
+            let notificationCreated = false;
+            try {
+              const notifRes = await dispatchOutcomeVerifiedNotification({
+                outcomeId: retryUpdated._id,
+                eventId,
+                studentId: retryUpdated.student,
+                collegeId: retryUpdated.collegeId,
+                placementDriveId: retryUpdated.placementDrive,
+                applicationId,
+                verifiedAt: retryTime,
+              });
+              notificationCreated = !!notifRes.notificationCreated;
+            } catch (postCommitErr) {
+              console.error('[Notification Dispatch Failure]:', {
+                outcomeId: retryUpdated._id ? retryUpdated._id.toString() : null,
+                collegeId: collegeId ? collegeId.toString() : null,
+                type: 'OUTCOME_VERIFIED',
+                errorName: postCommitErr.name || 'Error',
+                errorCode: postCommitErr.code || null,
+                errorMessage: (postCommitErr.message || '').substring(0, 200),
+              });
+            }
+
             return {
               status: 200,
-              data: formatOutcomeResponse(retryUpdated, 'reverified'),
+              data: formatOutcomeResponse(retryUpdated, 'reverified', notificationCreated),
             };
           }
 
@@ -691,6 +864,7 @@ module.exports = {
   revokeOutcomeService: (params) => mutateOutcomeService({ ...params, action: 'revoke' }),
   getOutcomeHistoryService,
   formatOutcomeResponse,
+  dispatchOutcomeVerifiedNotification,
   validateOfferPackageCtc,
   validateRevokeReason,
 };

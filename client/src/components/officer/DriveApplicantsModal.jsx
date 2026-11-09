@@ -95,7 +95,7 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
           prev.map((app) => (app._id === applicationId ? { ...app, status: newStatus } : app))
         );
         setActionSuccess(`Status updated to "${newStatus}".`);
-        // Notify parent dashboard to update live summary metrics (such as Offers Made)
+        // Notify parent dashboard to update live summary metrics (such as Selected applications)
         if (onStatusUpdated) {
           onStatusUpdated({
             driveId: drive._id,
@@ -106,12 +106,20 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
         }
         setTimeout(() => setActionSuccess(''), 3000);
       } else {
-        setActionError(res.message || 'Failed to update applicant status.');
+        if (res.code === 'VERIFIED_OUTCOME_EXISTS' || (res.message && res.message.includes('verified placement outcome'))) {
+          setActionError('This application has a verified placement outcome. Revoke it before changing the status.');
+        } else {
+          setActionError(res.message || 'Failed to update applicant status.');
+        }
       }
     } catch (err) {
-      setActionError(
-        err.response?.data?.message || 'Error occurred while updating application status.'
-      );
+      if (err.response?.data?.code === 'VERIFIED_OUTCOME_EXISTS' || (err.response?.data?.message && err.response.data.message.includes('verified placement outcome'))) {
+        setActionError('This application has a verified placement outcome. Revoke it before changing the status.');
+      } else {
+        setActionError(
+          err.response?.data?.message || 'Error occurred while updating application status.'
+        );
+      }
     } finally {
       setUpdatingId(null);
     }
@@ -414,7 +422,13 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                               <span>Updating...</span>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {app.outcomeVerified && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200" title="Placement outcome confirmed">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Verified</span>
+                                </span>
+                              )}
                               <span
                                 className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getStatusBadgeClass(
                                   app.status

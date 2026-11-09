@@ -8,6 +8,7 @@ const {
   archiveDrive,
   restoreDrive,
   deleteDrive,
+  getPlacementMetrics,
 } = require('../controllers/officerController');
 const {
   getOfficerDepartments,
@@ -22,6 +23,8 @@ const {
   verifyOutcome,
   revokeOutcome,
   getOutcomeHistory,
+  getOutcomesQueue,
+  getVerifiedOutcomes,
 } = require('../controllers/placementOutcomeController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -50,6 +53,10 @@ router.post('/drives/:id/attendance/mark', markDriveAttendance);
 router.patch('/applications/:id/status', updateApplicationStatus);
 
 // Placement Outcome Management
+router.get('/metrics', getPlacementMetrics);
+router.get('/dashboard/metrics', getPlacementMetrics);
+router.get('/outcomes/queue', getOutcomesQueue);
+router.get('/outcomes', getVerifiedOutcomes);
 router.post('/outcomes/:applicationId/verify', verifyOutcome);
 router.post('/outcomes/:applicationId/revoke', revokeOutcome);
 router.get('/outcomes/:applicationId/history', getOutcomeHistory);

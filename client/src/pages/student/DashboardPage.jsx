@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { dashboardService } from '../../services/dashboardService';
 import { notificationService } from '../../services/notificationService';
+import { normalizeStudentOutcomes } from '../../utils/placementMetrics';
+import { METRIC_LABELS, METRIC_DESCRIPTIONS } from '../../constants/placementMetrics';
 import {
   Briefcase,
   FileCheck2,
@@ -28,6 +30,11 @@ const DashboardPage = () => {
     inProgressApplications: 0,
     selectedApplications: 0,
   });
+  const [studentOutcomes, setStudentOutcomes] = useState({
+    verifiedOutcomes: [],
+    pendingSelections: [],
+    pendingSelectionsCount: 0,
+  });
   const [latestDrives, setLatestDrives] = useState([]);
   const [recentNotifications, setRecentNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,9 +47,10 @@ const DashboardPage = () => {
       try {
         setLoading(true);
         setError('');
-        const [summaryRes, notifRes] = await Promise.allSettled([
+        const [summaryRes, notifRes, outcomesRes] = await Promise.allSettled([
           dashboardService.getSummary(),
           notificationService.getNotifications(),
+          dashboardService.getOutcomes(),
         ]);
 
         if (!isMounted) return;
@@ -56,12 +64,22 @@ const DashboardPage = () => {
             selectedApplications: s.selectedApplications ?? s.summary?.selectedApplications ?? 0,
           });
           setLatestDrives(s.latestDrives || []);
+
+          // Fallback to summary response for outcomes if outcomesRes fails
+          if (s.verifiedOutcomes || s.pendingSelections) {
+            setStudentOutcomes(normalizeStudentOutcomes(s));
+          }
         } else if (summaryRes.status === 'rejected') {
           console.error('Failed to load dashboard summary:', summaryRes.reason);
           setError(
             summaryRes.reason?.response?.data?.message ||
               'Unable to load dashboard summary metrics. Please refresh.'
           );
+        }
+
+        // Dedicated student outcomes response
+        if (outcomesRes.status === 'fulfilled' && outcomesRes.value?.success) {
+          setStudentOutcomes(normalizeStudentOutcomes(outcomesRes.value));
         }
 
         if (notifRes.status === 'fulfilled' && notifRes.value?.success) {
@@ -100,6 +118,17 @@ const DashboardPage = () => {
     if (diffHr > 0) return `${diffHr}h ago`;
     if (diffMin > 0) return `${diffMin}m ago`;
     return 'Just now';
+  };
+
+  const formatVerifiedDate = (dateString) => {
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
   };
 
   return (
@@ -172,19 +201,106 @@ const DashboardPage = () => {
           <p className="text-xs text-slate-400 mt-1">Active recruitment rounds</p>
         </div>
 
-        {/* Selected */}
+        {/* Selected (Unverified) */}
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Selected</span>
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              {METRIC_LABELS.SELECTED_UNVERIFIED}
+            </span>
+            <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <Award className="w-5 h-5" />
             </div>
           </div>
           <div className="text-2xl font-bold text-slate-800">
-            {loading ? <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /> : summary.selectedApplications}
+            {loading ? (
+              <Loader2 className="w-6 h-6 text-amber-600 animate-spin" />
+            ) : (
+              studentOutcomes.pendingSelectionsCount
+            )}
           </div>
-          <p className="text-xs text-slate-400 mt-1">Offers accepted</p>
+          <p className="text-xs text-slate-400 mt-1">{METRIC_DESCRIPTIONS.SELECTED_UNVERIFIED}</p>
         </div>
+      </div>
+
+      {/* Verified Placement Section (Phase 4C) */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Award className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">{METRIC_LABELS.VERIFIED_SECTION_TITLE}</h2>
+              <p className="text-xs text-slate-500">Official verified recruitment outcomes confirmed by your institution</p>
+            </div>
+          </div>
+          {studentOutcomes.verifiedOutcomes.length > 0 && (
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+              {studentOutcomes.verifiedOutcomes.length} {studentOutcomes.verifiedOutcomes.length === 1 ? 'Outcome' : 'Outcomes'}
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center flex flex-col items-center justify-center">
+            <Loader2 className="w-6 h-6 text-emerald-600 animate-spin mb-2" />
+            <span className="text-xs text-slate-400">Loading verified outcomes...</span>
+          </div>
+        ) : studentOutcomes.verifiedOutcomes.length === 0 ? (
+          <div className="py-8 px-4 text-center border-2 border-dashed border-slate-100 rounded-xl bg-slate-50/50">
+            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
+              <Award className="w-5 h-5" />
+            </div>
+            <h3 className="text-xs font-semibold text-slate-700">No verified placement outcomes yet</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
+              {METRIC_DESCRIPTIONS.VERIFIED_EMPTY_STATE}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {studentOutcomes.verifiedOutcomes.map((outcome, idx) => (
+              <div
+                key={`${outcome.company}-${outcome.role}-${idx}`}
+                className="p-4 rounded-xl border border-slate-200/80 bg-white hover:border-emerald-200 transition shadow-2xs flex flex-col justify-between gap-3 min-w-0"
+              >
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider truncate max-w-full">
+                        {outcome.company}
+                      </span>
+                      {/* Badge uses text AND icon */}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Verified</span>
+                      </span>
+                    </div>
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-1 truncate" title={outcome.role}>
+                      {outcome.role}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-100 flex-wrap gap-2 min-w-0">
+                  {outcome.formattedCtc !== '—' ? (
+                    <div className="flex items-center gap-1 font-bold text-slate-900 shrink-0">
+                      <IndianRupee className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{outcome.formattedCtc}</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 text-xs shrink-0">Package confidential</span>
+                  )}
+                  {outcome.verifiedAt && (
+                    <div className="flex items-center gap-1 text-slate-400 text-[11px] shrink-0">
+                      <Calendar className="w-3 h-3" />
+                      <span>Verified on {formatVerifiedDate(outcome.verifiedAt)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Main Sections: Eligible Drives & Recent Activity */}

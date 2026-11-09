@@ -70,4 +70,47 @@ export const officerService = {
     const response = await api.post(`/officer/drives/${driveId}/attendance/mark`, { entries });
     return response.data;
   },
+
+  // Verified Placement Metrics (Phase 4C)
+  getMetrics: async () => {
+    const response = await api.get('/officer/metrics');
+    return response.data;
+  },
+
+  // Placement Outcomes Management (Phase 4D)
+  getOutcomesQueue: async (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.page) query.append('page', params.page);
+    if (params.limit) query.append('limit', params.limit);
+    if (params.driveId) query.append('driveId', params.driveId);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const response = await api.get(`/officer/outcomes/queue${qs}`);
+    return response.data;
+  },
+
+  getVerifiedOutcomes: async (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.page) query.append('page', params.page);
+    if (params.limit) query.append('limit', params.limit);
+    if (params.driveId) query.append('driveId', params.driveId);
+    if (params.department) query.append('department', params.department);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const response = await api.get(`/officer/outcomes${qs}`);
+    return response.data;
+  },
+
+  verifyOutcome: async (applicationId, data = {}) => {
+    const response = await api.post(`/officer/outcomes/${applicationId}/verify`, data);
+    return response.data;
+  },
+
+  revokeOutcome: async (applicationId, data = {}) => {
+    const response = await api.post(`/officer/outcomes/${applicationId}/revoke`, data);
+    return response.data;
+  },
+
+  getOutcomeHistory: async (applicationId) => {
+    const response = await api.get(`/officer/outcomes/${applicationId}/history`);
+    return response.data;
+  },
 };

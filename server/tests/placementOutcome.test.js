@@ -912,8 +912,8 @@ describe('CPMS Phase 4A: Placement Outcome Backend Foundation Tests', () => {
   // =========================================================================
   // SUITE 8: ZERO NOTIFICATION DOCS & STRICT FORBIDDEN KEYS WHITELIST
   // =========================================================================
-  describe('8. Zero Notifications & Whitelist Sanitization', () => {
-    it('NO Notification documents are created by verify or revoke', async () => {
+  describe('8. Notification Delivery & Whitelist Sanitization', () => {
+    it('OUTCOME_VERIFIED notification created on verify, NO notifications on revoke, NO STATUS_UPDATE', async () => {
       const initialNotifCount = await Notification.countDocuments();
       expect(initialNotifCount).toBe(0);
 
@@ -924,16 +924,23 @@ describe('CPMS Phase 4A: Placement Outcome Backend Foundation Tests', () => {
         .send({ ctc: 12 });
 
       let postVerifyNotifCount = await Notification.countDocuments();
-      expect(postVerifyNotifCount).toBe(0);
+      expect(postVerifyNotifCount).toBe(1);
+      const notif = await Notification.findOne();
+      expect(notif.type).toBe('OUTCOME_VERIFIED');
+      expect(notif.eventKey).toMatch(/^outcome_verified:/);
 
-      // Revoke
+      // Ensure no STATUS_UPDATE was emitted
+      const statusUpdateCount = await Notification.countDocuments({ type: 'STATUS_UPDATE' });
+      expect(statusUpdateCount).toBe(0);
+
+      // Revoke creates NO notifications
       await request(app)
         .post(`/api/officer/outcomes/${selectedAppAlpha._id}/revoke`)
         .set('Authorization', `Bearer ${tokenOfficerAlpha}`)
         .send({ reason: 'Verifying notification zero creation check.' });
 
       let postRevokeNotifCount = await Notification.countDocuments();
-      expect(postRevokeNotifCount).toBe(0);
+      expect(postRevokeNotifCount).toBe(1); // Still 1; no new notification on revoke
     });
 
     it('responses contain no forbidden keys (student email, phone, CGPA, resume, password)', async () => {

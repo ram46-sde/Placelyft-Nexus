@@ -1,9 +1,12 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
+import { normalizePlacementMetrics } from '../../utils/placementMetrics';
+import { METRIC_LABELS, METRIC_DESCRIPTIONS } from '../../constants/placementMetrics';
 import CreateDriveModal from '../../components/officer/CreateDriveModal';
 import DriveApplicantsModal from '../../components/officer/DriveApplicantsModal';
+import PlacementOutcomesSection from '../../components/officer/PlacementOutcomesSection';
 import CompanyLocation from '../../components/common/CompanyLocation';
 import {
   Briefcase,
@@ -102,7 +105,8 @@ const OfficerDashboardPage = () => {
   const navigate = useNavigate();
 
   // State
-  const [activeTab, setActiveTab] = useState('drives');
+  const [activeTab, setActiveTab] = useState('drives'); // 'drives' | 'outcomes'
+  const [outcomesSubView, setOutcomesSubView] = useState('queue'); // 'queue' | 'verified'
   const [drives, setDrives] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(''); // Only for page-level fetch errors
@@ -125,12 +129,57 @@ const OfficerDashboardPage = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedDriveForApplicants, setSelectedDriveForApplicants] = useState(null);
 
+  // Stage B & 4C: Verified Placement Metrics State
+  const [placementMetrics, setPlacementMetrics] = useState({
+    verifiedSelections: 0,
+    verifiedOffers: 0,
+    highestPackage: null,
+    needsVerification: 0,
+  });
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [metricsError, setMetricsError] = useState('');
+  const metricsRequestIdRef = useRef(0);
+
+  const fetchMetrics = useCallback(async () => {
+    const requestId = ++metricsRequestIdRef.current;
+    setMetricsLoading(true);
+    setMetricsError('');
+    try {
+      const data = await officerService.getMetrics();
+      if (requestId === metricsRequestIdRef.current) {
+        if (data && (data.success || data.verifiedSelections !== undefined)) {
+          setPlacementMetrics(normalizePlacementMetrics(data));
+        } else {
+          setMetricsError(data?.message || METRIC_DESCRIPTIONS.METRICS_ERROR_MESSAGE);
+        }
+      }
+    } catch (err) {
+      if (requestId === metricsRequestIdRef.current) {
+        setMetricsError(
+          err.response?.data?.message || METRIC_DESCRIPTIONS.METRICS_ERROR_MESSAGE
+        );
+      }
+    } finally {
+      if (requestId === metricsRequestIdRef.current) {
+        setMetricsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMetrics();
+    return () => {
+      // Cancel in-flight requests on unmount and ignore stale responses
+      metricsRequestIdRef.current += 1;
+    };
+  }, [fetchMetrics]);
+
   const handleLogout = () => {
     logout();
     navigate('/placement-officer/login');
   };
 
-  // Fetch applicant rosters for each drive to compute real Total Applicants and Offers Made
+  // Fetch applicant rosters for each drive to compute applicant counts and Selected totals
   const fetchApplicantStats = useCallback(async (drivesList) => {
     if (!drivesList || drivesList.length === 0) {
       setDriveStats({});
@@ -470,6 +519,32 @@ const OfficerDashboardPage = () => {
             <Briefcase className="w-4 h-4" />
             <span>Placement Drives</span>
           </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('outcomes');
+              setOutcomesSubView('queue');
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
+              activeTab === 'outcomes'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <Award className="w-4 h-4" />
+            <span>Placement Outcomes</span>
+            {placementMetrics.needsVerification > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeTab === 'outcomes'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {placementMetrics.needsVerification}
+              </span>
+            )}
+          </button>
         </div>
 
         {activeTab === 'drives' && (
@@ -479,7 +554,7 @@ const OfficerDashboardPage = () => {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Placement Drives</h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Manage on-campus placement drives, evaluate applicants, and record offers.
+              Manage on-campus placement drives, evaluate applicants, and record selection outcomes.
             </p>
           </div>
 
@@ -502,8 +577,8 @@ const OfficerDashboardPage = () => {
           </div>
         </div>
 
-        {/* Summary Metrics Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Drive Overview Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           {/* Card 1: Total Drives */}
           <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
             <div className="flex items-center justify-between mb-3">
@@ -555,26 +630,149 @@ const OfficerDashboardPage = () => {
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Students registered across drives</div>
           </div>
+        </div>
 
-          {/* Card 4: Offers Made */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Offers Made
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
-                <Award className="w-4 h-4" />
+        {/* Verified Placement Metrics Card Group (Phase 4C) */}
+        <div className="space-y-2">
+          {metricsError ? (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                <span>{metricsError}</span>
+              </div>
+              <button
+                onClick={fetchMetrics}
+                disabled={metricsLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${metricsLoading ? 'animate-spin' : ''}`} />
+                <span>{METRIC_DESCRIPTIONS.RETRY_BUTTON}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              {/* Card 1: Verified Selections */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    {METRIC_LABELS.VERIFIED_SELECTIONS}
+                  </span>
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                  {metricsLoading ? (
+                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                  ) : (
+                    placementMetrics.verifiedSelections
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_SELECTIONS}</div>
+              </div>
+
+              {/* Card 2: Verified Offers */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    {METRIC_LABELS.VERIFIED_OFFERS}
+                  </span>
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                    <Award className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                  {metricsLoading ? (
+                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                  ) : (
+                    placementMetrics.verifiedOffers
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_OFFERS}</div>
+              </div>
+
+              {/* Card 3: Highest Package */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    {METRIC_LABELS.HIGHEST_PACKAGE}
+                  </span>
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                    <IndianRupee className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                  {metricsLoading ? (
+                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                  ) : (
+                    placementMetrics.highestPackage?.formatted || '—'
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.HIGHEST_PACKAGE}</div>
+              </div>
+
+              {/* Card 4: Needs Verification */}
+              <div
+                onClick={() => {
+                  setActiveTab('outcomes');
+                  setOutcomesSubView('queue');
+                }}
+                className={`p-4 sm:p-5 rounded-2xl transition cursor-pointer select-none group ${
+                  placementMetrics.needsVerification > 0
+                    ? 'bg-amber-50/40 border border-amber-300/80 shadow-xs hover:border-amber-400'
+                    : 'bg-white border border-slate-200/80 shadow-xs hover:border-slate-300'
+                }`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setActiveTab('outcomes');
+                    setOutcomesSubView('queue');
+                  }
+                }}
+                title="Click to view applications awaiting verification"
+                aria-label="View Needs Verification queue"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span
+                    className={`text-xs font-bold uppercase tracking-wider ${
+                      placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-500'
+                    }`}
+                  >
+                    {METRIC_LABELS.NEEDS_VERIFICATION}
+                  </span>
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                      placementMetrics.needsVerification > 0
+                        ? 'bg-amber-100 border border-amber-200 text-amber-700'
+                        : 'bg-slate-100 border border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                </div>
+                <div
+                  className={`text-2xl sm:text-3xl font-extrabold flex items-center gap-2 ${
+                    placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-900'
+                  }`}
+                >
+                  {metricsLoading ? (
+                    <Loader2 className="w-5 h-5 text-amber-600 animate-spin" />
+                  ) : (
+                    placementMetrics.needsVerification
+                  )}
+                </div>
+                <div
+                  className={`text-[11px] mt-1 ${
+                    placementMetrics.needsVerification > 0 ? 'text-amber-700' : 'text-slate-400'
+                  }`}
+                >
+                  {METRIC_DESCRIPTIONS.NEEDS_VERIFICATION}
+                </div>
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-amber-700 flex items-center gap-2">
-              {loading || statsLoading ? (
-                <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
-              ) : (
-                summaryMetrics.totalOffers
-              )}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">Selected candidate offers</div>
-          </div>
+          )}
         </div>
 
         {/* Search & Filter Toolbar */}
@@ -878,7 +1076,7 @@ const OfficerDashboardPage = () => {
                       {stats.offersCount > 0 && (
                         <div className="flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-100/60 px-2 py-0.5 rounded-md text-[11px]">
                           <Award className="w-3 h-3 text-emerald-600" />
-                          <span>{stats.offersCount} Offer{stats.offersCount === 1 ? '' : 's'}</span>
+                          <span>{stats.offersCount} Selected</span>
                         </div>
                       )}
                     </div>
@@ -945,6 +1143,18 @@ const OfficerDashboardPage = () => {
           </div>
         )}
           </>
+        )}
+
+        {activeTab === 'outcomes' && (
+          <PlacementOutcomesSection
+            subView={outcomesSubView}
+            onSubViewChange={setOutcomesSubView}
+            drives={drives}
+            onOutcomeActionComplete={() => {
+              fetchMetrics();
+              fetchDrives();
+            }}
+          />
         )}
       </main>
 

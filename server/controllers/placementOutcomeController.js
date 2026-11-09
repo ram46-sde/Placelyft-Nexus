@@ -4,6 +4,10 @@ const {
   revokeOutcomeService,
   getOutcomeHistoryService,
 } = require('../services/placementOutcomeService');
+const {
+  getOutcomesQueueService,
+  getVerifiedOutcomesListService,
+} = require('../services/placementOutcomeListService');
 
 /**
  * @desc    Verify placement outcome for a selected applicant
@@ -118,8 +122,76 @@ const getOutcomeHistory = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get paginated queue of Selected applications awaiting outcome verification
+ * @route   GET /api/officer/outcomes/queue
+ * @access  Private (Placement Officer)
+ */
+const getOutcomesQueue = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const data = await getOutcomesQueueService({
+      collegeId: req.user.collegeId,
+      query: req.query || {},
+    });
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    return res.status(200).json({
+      success: true,
+      ...data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get paginated list of confirmed verified placement outcomes
+ * @route   GET /api/officer/outcomes
+ * @access  Private (Placement Officer)
+ */
+const getVerifiedOutcomes = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const data = await getVerifiedOutcomesListService({
+      collegeId: req.user.collegeId,
+      query: req.query || {},
+    });
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    return res.status(200).json({
+      success: true,
+      ...data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   verifyOutcome,
   revokeOutcome,
   getOutcomeHistory,
+  getOutcomesQueue,
+  getVerifiedOutcomes,
 };

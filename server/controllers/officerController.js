@@ -10,6 +10,7 @@ const User = require('../models/User');
 const { resolveUgBasis } = require('../utils/eligibilityEngine');
 const { getDriveLifecycleStatus } = require('../utils/driveLifecycle');
 const { changeApplicationStatus } = require('../services/applicationStatusService');
+const { getPlacementMetricsService } = require('../services/placementMetricsService');
 
 /**
  * Shared registry of placement drive dependent records.
@@ -1016,6 +1017,37 @@ const deleteDrive = async (req, res, next) => {
   }
 };
 
+// @desc    Get verified placement metrics for officer dashboard
+// @route   GET /api/officer/metrics
+// @access  Private (Placement Officer)
+const getPlacementMetrics = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const metrics = await getPlacementMetricsService({
+      collegeId: req.user.collegeId,
+      filters: req.query || {},
+    });
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    res.status(200).json({
+      success: true,
+      ...metrics,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createDrive,
   getOfficerDrives,
@@ -1024,6 +1056,7 @@ module.exports = {
   archiveDrive,
   restoreDrive,
   deleteDrive,
+  getPlacementMetrics,
   validateCompanyLocation,
   validateOfficerCollegeContext,
 };

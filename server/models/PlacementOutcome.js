@@ -36,6 +36,10 @@ const outcomeHistorySchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    eventId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
   },
   { _id: true }
 );

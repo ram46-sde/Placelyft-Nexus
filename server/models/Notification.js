@@ -24,8 +24,13 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['STATUS_UPDATE', 'DRIVE_ANNOUNCEMENT', 'SYSTEM'],
+      enum: ['STATUS_UPDATE', 'DRIVE_ANNOUNCEMENT', 'SYSTEM', 'OUTCOME_VERIFIED'],
       default: 'STATUS_UPDATE',
+    },
+    eventKey: {
+      type: String,
+      trim: true,
+      default: null,
     },
     placementDrive: {
       type: mongoose.Schema.Types.ObjectId,
@@ -59,6 +64,18 @@ notificationSchema.index(
     partialFilterExpression: {
       type: 'DRIVE_ANNOUNCEMENT',
       placementDrive: { $exists: true },
+    },
+  }
+);
+
+// Partial unique index on eventKey to ensure idempotent OUTCOME_VERIFIED delivery
+notificationSchema.index(
+  { eventKey: 1 },
+  {
+    name: 'eventKey_1_partial_unique',
+    unique: true,
+    partialFilterExpression: {
+      eventKey: { $type: 'string' },
     },
   }
 );

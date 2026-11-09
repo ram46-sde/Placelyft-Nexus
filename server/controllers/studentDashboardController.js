@@ -3,6 +3,7 @@ const DriveApplication = require('../models/DriveApplication');
 const StudentProfile = require('../models/StudentProfile');
 const { checkEligibility } = require('../utils/eligibilityEngine');
 const { getDriveLifecycleStatus, getDriveStatusQuery } = require('../utils/driveLifecycle');
+const { getStudentOutcomesService } = require('../services/studentOutcomesService');
 
 // @desc    Get aggregated metrics summary for the authenticated student's dashboard
 // @route   GET /api/student/dashboard/summary
@@ -101,6 +102,12 @@ const getStudentDashboardSummary = async (req, res, next) => {
       }
     }
 
+    // 7. Fetch verified outcomes and pending selections for the student
+    const outcomesData = await getStudentOutcomesService({
+      studentId,
+      collegeId,
+    });
+
     res.status(200).json({
       success: true,
       totalEligibleDrives,
@@ -115,6 +122,41 @@ const getStudentDashboardSummary = async (req, res, next) => {
       },
       latestDrives,
       latestDriveCreatedAt,
+      verifiedOutcomes: outcomesData.verifiedOutcomes,
+      pendingSelections: outcomesData.pendingSelections,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get student verified placement outcomes and pending selections
+// @route   GET /api/student/dashboard/outcomes
+// @access  Private (Student)
+const getStudentOutcomes = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.collegeId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Student account is not associated with an institution.',
+      });
+    }
+
+    if (req.user.collegeAssignmentStatus === 'LEGACY_UNVERIFIED') {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Student account college assignment is not verified.',
+      });
+    }
+
+    const data = await getStudentOutcomesService({
+      studentId: req.user._id,
+      collegeId: req.user.collegeId,
+    });
+
+    res.status(200).json({
+      success: true,
+      ...data,
     });
   } catch (error) {
     next(error);
@@ -123,4 +165,5 @@ const getStudentDashboardSummary = async (req, res, next) => {
 
 module.exports = {
   getStudentDashboardSummary,
+  getStudentOutcomes,
 };
