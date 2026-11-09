@@ -1,32 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { officerService } from '../../services/officerService';
 import { X, Briefcase, Building2, Calendar, FileText, CheckCircle2, Loader2, AlertCircle, MapPin } from 'lucide-react';
 
-const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
-  const [formData, setFormData] = useState({
-    companyName: '',
-    industry: '',
-    website: '',
-    companyDescription: '',
-    companyLocation: '',
-    jobRole: '',
-    jobDescription: '',
-    packageDetails: '',
-    driveDate: '',
-    registrationDeadline: '',
-    isActive: true,
-    minTenthPercentage: '0',
-    minTwelfthPercentage: '0',
-    ugCriteriaType: '',
-    minCgpa: '',
-    minUgPercentage: '',
-    maxBacklogs: '0',
-    requiredCoursesInput: '',
-    requiredSkillsInput: '',
-  });
+export const createInitialFormData = () => ({
+  companyName: '',
+  industry: '',
+  website: '',
+  companyDescription: '',
+  companyLocation: '',
+  jobRole: '',
+  jobDescription: '',
+  packageDetails: '',
+  driveDate: '',
+  registrationDeadline: '',
+  isActive: true,
+  minTenthPercentage: '0',
+  minTwelfthPercentage: '0',
+  ugCriteriaType: '',
+  minCgpa: '',
+  minUgPercentage: '',
+  maxBacklogs: '0',
+  requiredCoursesInput: '',
+  requiredSkillsInput: '',
+});
 
+const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
+  const [formData, setFormData] = useState(createInitialFormData);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const submittingRef = useRef(submitting);
+  submittingRef.current = submitting;
+
+  useEffect(() => {
+    if (isOpen && !submittingRef.current) {
+      setFormData(createInitialFormData());
+      setError('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -203,6 +213,8 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
       setSubmitting(true);
       const res = await officerService.createDrive(payload);
       if (res.success && res.drive) {
+        setFormData(createInitialFormData());
+        setError('');
         onDriveCreated(res.drive);
         onClose();
       } else {
@@ -231,7 +243,8 @@ const CreateDriveModal = ({ isOpen, onClose, onDriveCreated }) => {
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            disabled={submitting}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer disabled:opacity-50"
             aria-label="Close modal"
           >
             <X className="w-5 h-5" />
