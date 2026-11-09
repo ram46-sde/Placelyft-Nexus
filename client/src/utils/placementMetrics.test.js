@@ -81,7 +81,32 @@ test('4. Named Constants Validation', () => {
   assert.equal(EM_DASH, '—');
 });
 
-test('5. Guard Test: Scan client/src for hand-built unit strings outside formatCtc', () => {
+test('5. validateAndParseCtcInput Validation Rules', () => {
+  // Valid non-negative values including 0
+  assert.deepEqual(validateAndParseCtcInput('0'), { valid: true, ctc: 0 });
+  assert.deepEqual(validateAndParseCtcInput('0.00'), { valid: true, ctc: 0 });
+  assert.deepEqual(validateAndParseCtcInput('12.5'), { valid: true, ctc: 12.5 });
+  assert.deepEqual(validateAndParseCtcInput('100'), { valid: true, ctc: 100 });
+  assert.deepEqual(validateAndParseCtcInput('120'), { valid: true, ctc: 120 });
+  assert.deepEqual(validateAndParseCtcInput('200'), { valid: true, ctc: 200 });
+
+  // Package not available flow
+  assert.deepEqual(validateAndParseCtcInput('', true), { valid: true, ctc: null });
+  assert.deepEqual(validateAndParseCtcInput('0', true), { valid: true, ctc: null });
+
+  // Invalid values
+  assert.equal(validateAndParseCtcInput('').valid, false);
+  assert.equal(validateAndParseCtcInput('   ').valid, false);
+  assert.equal(validateAndParseCtcInput('-1').valid, false);
+  assert.equal(validateAndParseCtcInput('-0.01').valid, false);
+  assert.equal(validateAndParseCtcInput('200.01').valid, false);
+  assert.equal(validateAndParseCtcInput('12.345').valid, false);
+  assert.equal(validateAndParseCtcInput('1,000').valid, false);
+  assert.equal(validateAndParseCtcInput('1e2').valid, false);
+  assert.equal(validateAndParseCtcInput('abc').valid, false);
+});
+
+test('6. Guard Test: Scan client/src for hand-built unit strings outside formatCtc', () => {
   const clientSrcDir = path.resolve(import.meta.dirname, '..');
 
   function walk(dir) {

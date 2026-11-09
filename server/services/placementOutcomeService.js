@@ -24,8 +24,8 @@ function validateOfferPackageCtc(ctc) {
     return { valid: false, error: 'CTC must be a valid finite JSON number.' };
   }
 
-  if (ctc <= 0) {
-    return { valid: false, error: 'CTC must be greater than 0.' };
+  if (ctc < 0) {
+    return { valid: false, error: 'CTC cannot be negative.' };
   }
 
   if (ctc > 200) {

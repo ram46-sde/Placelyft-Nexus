@@ -225,9 +225,9 @@ export function normalizeStudentOutcomes(response) {
 /**
  * Validates and strictly parses officer CTC input for verification dialog.
  * Rules:
- * - Must be greater than 0 and at most 200, up to 2 decimals.
+ * - Must be non-negative (>= 0) and at most 200, up to 2 decimals.
  * - Unit is LPA.
- * - Reject empty-with-no-choice, zero, negative, non-numeric, 1e2, commas.
+ * - Reject empty-with-no-choice, negative, non-numeric, 1e2, commas (zero is valid: 0 LPA).
  * - If packageNotAvailable is true, returns { valid: true, ctc: null }.
  * 
  * @param {string} ctcInput Raw string input
@@ -268,8 +268,8 @@ export function validateAndParseCtcInput(ctcInput, packageNotAvailable = false) 
     return { valid: false, error: 'CTC must be a valid finite number.' };
   }
 
-  if (num <= 0) {
-    return { valid: false, error: 'CTC must be greater than 0.' };
+  if (num < 0) {
+    return { valid: false, error: 'CTC cannot be negative.' };
   }
 
   if (num > 200) {

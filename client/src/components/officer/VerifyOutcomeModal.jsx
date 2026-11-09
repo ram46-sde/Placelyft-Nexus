@@ -12,7 +12,7 @@ import {
   Info,
 } from 'lucide-react';
 import { officerService } from '../../services/officerService';
-import { validateAndParseCtcInput, mapOutcomeResult } from '../../utils/placementMetrics';
+import { formatCtc, validateAndParseCtcInput, mapOutcomeResult } from '../../utils/placementMetrics';
 
 /**
  * CPMS Phase 4D - Verify Outcome Modal Dialog
@@ -20,8 +20,8 @@ import { validateAndParseCtcInput, mapOutcomeResult } from '../../utils/placemen
  * Strict specifications:
  * - Shows student and application details.
  * - Required explanation: "Verification confirms a selected placement outcome. It does not confirm that the student accepted the offer or joined."
- * - Strict CTC parsing: positive number > 0 and <= 200, up to 2 decimals, unit "LPA", sent as JSON number.
- * - Reject empty-with-no-choice, zero, negative, non-numeric, 1e2, commas.
+ * - Strict CTC parsing: non-negative number >= 0 and <= 200, up to 2 decimals, unit "LPA", sent as JSON number.
+ * - Reject empty-with-no-choice, negative, non-numeric, 1e2, commas (zero is valid: 0 LPA).
  * - "Package not available" checkbox with mandatory warning.
  * - Confirmation step before submit.
  * - No automatic retries, no optimistic row removal.
@@ -29,6 +29,7 @@ import { validateAndParseCtcInput, mapOutcomeResult } from '../../utils/placemen
  */
 const VerifyOutcomeModal = ({ item, isOpen, onClose, onSuccess }) => {
   const [ctcInput, setCtcInput] = useState('');
+  const [parsedCtc, setParsedCtc] = useState(null);
   const [packageNotAvailable, setPackageNotAvailable] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [validationError, setValidationError] = useState('');
@@ -42,6 +43,7 @@ const VerifyOutcomeModal = ({ item, isOpen, onClose, onSuccess }) => {
   useEffect(() => {
     if (isOpen) {
       setCtcInput('');
+      setParsedCtc(null);
       setPackageNotAvailable(false);
       setIsConfirming(false);
       setValidationError('');
@@ -81,6 +83,7 @@ const VerifyOutcomeModal = ({ item, isOpen, onClose, onSuccess }) => {
       return;
     }
 
+    setParsedCtc(validation.ctc);
     setIsConfirming(true);
   };
 
@@ -250,7 +253,7 @@ const VerifyOutcomeModal = ({ item, isOpen, onClose, onSuccess }) => {
                   </div>
                 </div>
                 <p id="ctc-help-text" className="text-[11px] text-slate-400 mt-1">
-                  Must be between 0.01 and 200.00 LPA with at most 2 decimal places.
+                  Must be between 0.00 and 200.00 LPA with at most 2 decimal places.
                 </p>
               </div>
 
@@ -316,7 +319,7 @@ const VerifyOutcomeModal = ({ item, isOpen, onClose, onSuccess }) => {
                 <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between text-xs font-medium">
                   <span className="text-slate-500">Package to Record:</span>
                   <span className="font-bold text-slate-900">
-                    {packageNotAvailable ? 'Not Specified' : `₹ ${ctcInput} LPA`}
+                    {packageNotAvailable ? 'Not Specified' : formatCtc(parsedCtc)}
                   </span>
                 </div>
               </div>

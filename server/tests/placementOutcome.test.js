@@ -384,7 +384,10 @@ describe('CPMS Phase 4A: Placement Outcome Backend Foundation Tests', () => {
   // SUITE 2: CTC VALIDATION RULES & NEVER AUTO-FILL FROM DRIVE
   // =========================================================================
   describe('2. CTC Validation Rules', () => {
-    it('should accept valid CTC numbers (e.g. 1, 12.5, 18.75, 200)', async () => {
+    it('should accept valid CTC numbers including 0 (e.g. 0, 1, 12.5, 18.75, 200)', async () => {
+      expect(validateOfferPackageCtc(0).valid).toBe(true);
+      expect(validateOfferPackageCtc(0).parsedCtc).toBe(0);
+
       const res1 = await request(app)
         .post(`/api/officer/outcomes/${selectedAppAlpha._id}/verify`)
         .set('Authorization', `Bearer ${tokenOfficerAlpha}`)
@@ -422,12 +425,12 @@ describe('CPMS Phase 4A: Placement Outcome Backend Foundation Tests', () => {
       expect(dbOutcome.history[0].ctc).toBeNull();
     });
 
-    it('should reject invalid CTC values: 0, negative, >200, string, NaN, Infinity, and >2 decimals with 400', async () => {
+    it('should reject invalid CTC values: negative, >200, string, NaN, Infinity, and >2 decimals with 400', async () => {
       // Direct unit-level rejection assertions for NaN and Infinity
       expect(validateOfferPackageCtc(NaN).valid).toBe(false);
       expect(validateOfferPackageCtc(Infinity).valid).toBe(false);
       expect(validateOfferPackageCtc(-Infinity).valid).toBe(false);
-      expect(validateOfferPackageCtc(0).valid).toBe(false);
+      expect(validateOfferPackageCtc(-0.01).valid).toBe(false);
       expect(validateOfferPackageCtc(-5).valid).toBe(false);
       expect(validateOfferPackageCtc(200.01).valid).toBe(false);
       expect(validateOfferPackageCtc('12.5').valid).toBe(false);
@@ -435,7 +438,6 @@ describe('CPMS Phase 4A: Placement Outcome Backend Foundation Tests', () => {
 
       // HTTP endpoint rejection tests
       const testCases = [
-        { payload: { ctc: 0 }, desc: 'zero' },
         { payload: { ctc: -5 }, desc: 'negative' },
         { payload: { ctc: 200.01 }, desc: 'over 200' },
         { payload: { ctc: 250 }, desc: 'greater than 200' },
