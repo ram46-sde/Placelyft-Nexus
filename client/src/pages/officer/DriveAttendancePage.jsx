@@ -5,10 +5,11 @@ import { officerService } from '../../services/officerService';
 import DepartmentManagementSection from '../../components/officer/DepartmentManagementSection';
 import HodShareModal from '../../components/officer/HodShareModal';
 import AttendancePrintModal from '../../components/officer/AttendancePrintModal';
+import CompanyLocation from '../../components/common/CompanyLocation';
+import { formatSerialNumber } from '../../utils/applicantMetrics';
 import { downloadAttendanceCsv, copyAttendanceAsTsv } from '../../utils/attendanceExport';
 import {
   ArrowLeft,
-  Briefcase,
   Building2,
   Calendar,
   CheckCircle,
@@ -22,9 +23,6 @@ import {
   XCircle,
   Square,
   MinusSquare,
-  Tag,
-  User,
-  LogOut,
   Info,
   Share2,
   Download,
@@ -144,7 +142,7 @@ const getActiveAttendanceColumns = ({ isArchived = false } = {}) => {
 const DriveAttendancePage = () => {
   const { id: driveId } = useParams();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   // Core attendance data
   const [driveInfo, setDriveInfo] = useState(null);
@@ -526,11 +524,6 @@ const DriveAttendancePage = () => {
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/placement-officer/login');
-  };
-
   // ---- Render helpers ----
   const driveDate = driveContext?.driveDate || driveInfo?.driveDate;
   const lifecycleStatus = driveInfo?.status || 'active';
@@ -573,10 +566,10 @@ const DriveAttendancePage = () => {
           <p className="text-sm text-slate-600 mb-4">{fetchError}</p>
           <div className="flex items-center justify-center gap-3">
             <button
-              onClick={() => navigate('/officer/dashboard')}
+              onClick={() => navigate('/officer/drives')}
               className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
             >
-              Back to Dashboard
+              Back to Placement Drives
             </button>
             <button
               onClick={() => fetchAttendance()}
@@ -594,7 +587,7 @@ const DriveAttendancePage = () => {
   const renderApplicantCell = (
     columnId,
     applicant,
-    { isSelected, isHistoryExpanded, isHistoryLoadingItem, statusBadge }
+    { isSelected, isHistoryExpanded, isHistoryLoadingItem, statusBadge, serialNo }
   ) => {
     switch (columnId) {
       case 'select':
@@ -613,9 +606,24 @@ const DriveAttendancePage = () => {
 
       case 'studentName':
         return (
-          <span className="font-semibold text-slate-900 block break-words">
-            {applicant.studentName}
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {serialNo && (
+              <>
+                <span
+                  className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-mono font-semibold shrink-0"
+                  title={`Applicant #${serialNo}`}
+                >
+                  {serialNo}
+                </span>
+                <span className="text-slate-300 font-normal select-none" aria-hidden="true">
+                  —
+                </span>
+              </>
+            )}
+            <span className="font-semibold text-slate-900 block break-words">
+              {applicant.studentName}
+            </span>
+          </div>
         );
 
       case 'rollNumber':
@@ -725,55 +733,19 @@ const DriveAttendancePage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Top Navigation Bar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigate('/officer/dashboard')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
-                aria-label="Back to dashboard"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-emerald-700 to-emerald-500 text-white flex items-center justify-center shadow-sm">
-                  <Briefcase className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="font-bold text-slate-900 text-sm leading-tight block">
-                    Drive Attendance
-                  </span>
-                  <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider block">
-                    CPMS Officer Portal
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200">
-                <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold">
-                  {user?.name?.charAt(0).toUpperCase() || 'P'}
-                </div>
-                <span className="hidden sm:inline text-xs font-semibold text-slate-800">
-                  {user?.name || 'Officer'}
-                </span>
-              </div>
-              <button
-                onClick={handleLogout}
-                title="Sign Out"
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer border border-transparent hover:border-rose-200"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5">
+        {/* Top Breadcrumb / Back Bar */}
+        <div className="flex items-center justify-between gap-4">
+          <button
+            onClick={() => navigate('/officer/drives')}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 hover:text-emerald-700 bg-white hover:bg-emerald-50/50 border border-slate-200 hover:border-emerald-200 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
+            aria-label="Back to Placement Drives"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-600" />
+            <span>Back to Placement Drives</span>
+          </button>
+        </div>
+
         {/* Toast Notification */}
         {toast && (
           <div
@@ -820,144 +792,132 @@ const DriveAttendancePage = () => {
         {/* Drive Header & Action Bar */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5">
           <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold text-slate-900">
-                  {driveInfo?.company || 'Company'}
-                </h1>
-                <span className="text-slate-300">•</span>
-                <span className="text-base font-semibold text-slate-700">
-                  {driveInfo?.jobRole || 'Job Role'}
-                </span>
-                <span
-                  className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${lifecycleBadge.cls}`}
-                >
-                  {lifecycleBadge.label}
-                </span>
+            <div className="flex items-start gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
+                {driveInfo?.company?.charAt(0)?.toUpperCase() || 'C'}
               </div>
-
-              {driveDate && (
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="font-medium">Drive Date: {formatDate(driveDate)}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Summary Counters & Primary Actions */}
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Metrics Box */}
-              <div className="flex items-center gap-4 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
-                <div className="text-center">
-                  <div className="text-lg font-extrabold text-slate-900">
-                    {summary.totalApplicants}
-                  </div>
-                  <div className="text-[10px] text-slate-500 font-semibold uppercase">Total</div>
-                </div>
-                <div className="w-px h-8 bg-slate-200" />
-                <div className="text-center">
-                  <div className="text-lg font-extrabold text-emerald-700">{summary.present}</div>
-                  <div className="text-[10px] text-emerald-600 font-semibold uppercase">Present</div>
-                </div>
-                <div className="w-px h-8 bg-slate-200" />
-                <div className="text-center">
-                  <div className="text-lg font-extrabold text-rose-700">{summary.absent}</div>
-                  <div className="text-[10px] text-rose-600 font-semibold uppercase">Absent</div>
-                </div>
-                <div className="w-px h-8 bg-slate-200" />
-                <div className="text-center">
-                  <div className="text-lg font-extrabold text-amber-700">{summary.pending}</div>
-                  <div className="text-[10px] text-amber-600 font-semibold uppercase">Pending</div>
-                </div>
-              </div>
-
-              {/* Action Buttons: Share with HOD, Export Menu, Print, Refresh */}
-              <div className="flex items-center gap-2">
-                {/* Share with HOD Button */}
-                <button
-                  onClick={() => setShowShareModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-xs transition cursor-pointer"
-                  title="Share attendance report with Department HOD"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share with HOD</span>
-                </button>
-
-                {/* Export Dropdown */}
-                <div className="relative" ref={exportMenuRef}>
-                  <button
-                    onClick={() => setShowExportMenu((prev) => !prev)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl shadow-2xs transition cursor-pointer"
-                    aria-expanded={showExportMenu}
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-xl font-bold text-slate-900">
+                    {driveInfo?.company || 'Company'}
+                  </h1>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-base font-semibold text-slate-700">
+                    {driveInfo?.jobRole || 'Job Role'}
+                  </span>
+                  <span
+                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${lifecycleBadge.cls}`}
                   >
-                    <Download className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Export</span>
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                  </button>
+                    {lifecycleBadge.label}
+                  </span>
+                </div>
 
-                  {showExportMenu && (
-                    <div className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-30 text-xs">
-                      <button
-                        onClick={() => handleExportCsv(false)}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
-                      >
-                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                        <span>Export CSV ({activeTab === '__ALL__' ? 'All' : activeTab})</span>
-                      </button>
-                      <button
-                        onClick={() => handleExportCsv(true)}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
-                      >
-                        <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                        <span>Export All Departments CSV</span>
-                      </button>
-                      <button
-                        onClick={handleCopyTable}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer border-t border-slate-100"
-                      >
-                        <Copy className="w-4 h-4 text-blue-600" />
-                        <span>Copy Table (Excel / Sheets)</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowExportMenu(false);
-                          setShowPrintModal(true);
-                        }}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
-                      >
-                        <Printer className="w-4 h-4 text-purple-600" />
-                        <span>Print Attendance Sheet / PDF</span>
-                      </button>
+                <div className="flex items-center gap-3.5 flex-wrap text-xs text-slate-500">
+                  {driveDate && (
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className="font-medium">Drive Date: {formatDate(driveDate)}</span>
                     </div>
                   )}
-                </div>
-
-                {/* Print Quick Button */}
-                <button
-                  onClick={() => setShowPrintModal(true)}
-                  title="Print Attendance Report / Save as PDF"
-                  className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                </button>
-
-                {/* Refresh Button */}
-                <button
-                  onClick={() => fetchAttendance()}
-                  disabled={loading}
-                  title="Refresh attendance"
-                  className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw
-                    className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`}
+                  <CompanyLocation
+                    location={driveContext?.location || driveInfo?.location}
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-500 min-w-0"
+                    iconClassName="w-3.5 h-3.5 text-emerald-600 shrink-0"
                   />
-                </button>
+                  <div className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="font-medium">{summary.totalApplicants} registered students</span>
+                  </div>
+                </div>
               </div>
+            </div>
+
+            {/* Action Buttons: Share with HOD, Export Menu, Print, Refresh */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Share with HOD Button */}
+              <button
+                onClick={() => setShowShareModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-xs transition cursor-pointer"
+                title="Share attendance report with Department HOD"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Share with HOD</span>
+              </button>
+
+              {/* Export Dropdown */}
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  onClick={() => setShowExportMenu((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl shadow-2xs transition cursor-pointer"
+                  aria-expanded={showExportMenu}
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Export</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {showExportMenu && (
+                  <div className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-30 text-xs">
+                    <button
+                      onClick={() => handleExportCsv(false)}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <span>Export CSV ({activeTab === '__ALL__' ? 'All' : activeTab})</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportCsv(true)}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                      <span>Export All Departments CSV</span>
+                    </button>
+                    <button
+                      onClick={handleCopyTable}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer border-t border-slate-100"
+                    >
+                      <Copy className="w-4 h-4 text-emerald-600" />
+                      <span>Copy Table (Excel / Sheets)</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        setShowPrintModal(true);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700 font-medium cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-slate-600" />
+                      <span>Print Attendance Sheet / PDF</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Print Quick Button */}
+              <button
+                onClick={() => setShowPrintModal(true)}
+                title="Print Attendance Report / Save as PDF"
+                className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+              </button>
+
+              {/* Refresh Button */}
+              <button
+                onClick={() => fetchAttendance()}
+                disabled={loading}
+                title="Refresh attendance"
+                className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`}
+                />
+              </button>
             </div>
           </div>
 
           {/* Single Entry Point: Department Settings */}
-          <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
+          <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100 text-xs">
             <button
               onClick={() => setIsDeptPanelOpen((prev) => !prev)}
               className="inline-flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer hover:underline"
@@ -967,6 +927,69 @@ const DriveAttendancePage = () => {
               <Building2 className="w-3.5 h-3.5" />
               <span>Department Settings</span>
             </button>
+          </div>
+        </div>
+
+        {/* Attendance Summary KPI Grid (4 Cards) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          {/* Total Students */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Total Students
+              </div>
+              <div className="text-2xl font-black text-slate-900 leading-tight">
+                {summary.totalApplicants}
+              </div>
+            </div>
+          </div>
+
+          {/* Present */}
+          <div className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-xs flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200/60">
+              <CheckCircle className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                Present
+              </div>
+              <div className="text-2xl font-black text-emerald-700 leading-tight">
+                {summary.present}
+              </div>
+            </div>
+          </div>
+
+          {/* Absent */}
+          <div className="bg-white rounded-2xl border border-rose-100 p-4 shadow-xs flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200/60">
+              <XCircle className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-rose-700 uppercase tracking-wider">
+                Absent
+              </div>
+              <div className="text-2xl font-black text-rose-700 leading-tight">
+                {summary.absent}
+              </div>
+            </div>
+          </div>
+
+          {/* Pending */}
+          <div className="bg-white rounded-2xl border border-amber-100 p-4 shadow-xs flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200/60">
+              <Clock className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-amber-700 uppercase tracking-wider">
+                Pending
+              </div>
+              <div className="text-2xl font-black text-amber-700 leading-tight">
+                {summary.pending}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1180,12 +1203,13 @@ const DriveAttendancePage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredApplicants.map((applicant) => {
+                  {filteredApplicants.map((applicant, applicantIndex) => {
                     const isSelected = selection.has(applicant.applicationId);
                     const isHistoryExpanded = expandedHistory.has(applicant.applicationId);
                     const isHistoryLoadingItem = historyLoading.has(applicant.applicationId);
                     const statusBadge =
                       STATUS_BADGE_CLASSES[applicant.status] || STATUS_BADGE_CLASSES.Pending;
+                    const serialNo = formatSerialNumber(applicantIndex);
 
                     return (
                       <Fragment key={applicant.applicationId}>
@@ -1201,6 +1225,7 @@ const DriveAttendancePage = () => {
                                 isHistoryExpanded,
                                 isHistoryLoadingItem,
                                 statusBadge,
+                                serialNo,
                               })}
                             </td>
                           ))}

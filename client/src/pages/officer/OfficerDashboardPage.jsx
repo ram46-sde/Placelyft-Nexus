@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
 import { normalizePlacementMetrics } from '../../utils/placementMetrics';
+import { calculateApplicantMetrics } from '../../utils/applicantMetrics';
 import { METRIC_LABELS, METRIC_DESCRIPTIONS } from '../../constants/placementMetrics';
 import CreateDriveModal from '../../components/officer/CreateDriveModal';
 import EditDriveModal from '../../components/officer/EditDriveModal';
@@ -19,7 +19,6 @@ import {
   Clock,
   Building2,
   ExternalLink,
-  LogOut,
   RefreshCw,
   AlertCircle,
   Filter,
@@ -103,7 +102,6 @@ const isDriveActive = (drive, now = new Date()) => {
 };
 
 const OfficerDashboardPage = () => {
-  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   // State
@@ -177,11 +175,6 @@ const OfficerDashboardPage = () => {
       metricsRequestIdRef.current += 1;
     };
   }, [fetchMetrics]);
-
-  const handleLogout = () => {
-    logout();
-    navigate('/placement-officer/login');
-  };
 
   // Fetch applicant rosters for each drive to compute applicant counts and Selected totals
   const fetchApplicantStats = useCallback(async (drivesList) => {
@@ -326,21 +319,17 @@ const OfficerDashboardPage = () => {
     const closedDrives = serverCounts.closed ?? drives.filter((d) => getDriveStatus(d) === 'closed').length;
     const archivedDrives = serverCounts.archived ?? drives.filter((d) => getDriveStatus(d) === 'archived').length;
 
-    let totalApplicants = 0;
-    let totalOffers = 0;
-
-    Object.values(driveStats).forEach((stat) => {
-      totalApplicants += stat.count || 0;
-      totalOffers += stat.offersCount || 0;
-    });
+    const applicantMetrics = calculateApplicantMetrics(driveStats);
 
     return {
       totalDrives,
       activeDrives,
       closedDrives,
       archivedDrives,
-      totalApplicants,
-      totalOffers,
+      uniqueApplicants: applicantMetrics.uniqueApplicants,
+      totalApplicants: applicantMetrics.uniqueApplicants, // SSoT: Distinct students who applied
+      totalApplications: applicantMetrics.totalApplications, // SSoT: Total application submissions across all drives
+      totalOffers: applicantMetrics.totalOffers,
     };
   }, [drives, serverCounts, driveStats]);
 
@@ -452,362 +441,356 @@ const OfficerDashboardPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Top Navigation Bar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            {/* Branding */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-700 to-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
-                <Briefcase className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="font-bold text-slate-900 text-base sm:text-lg leading-tight block">
-                  CPMS
-                </span>
-                <span className="text-[11px] text-emerald-600 font-bold uppercase tracking-wider block">
-                  Placement Officer Portal
-                </span>
-              </div>
-            </div>
-
-            {/* Officer Profile & Sign Out */}
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200">
-                <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shadow-xs">
-                  {user?.name?.charAt(0).toUpperCase() || 'P'}
-                </div>
-                <div className="hidden sm:block text-left pr-1">
-                  <div className="text-xs font-semibold text-slate-800 leading-none">
-                    {user?.name || 'Placement Officer'}
-                  </div>
-                  <div className="text-[10px] text-emerald-700 font-medium leading-tight">
-                    {user?.role || 'placement_officer'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={handleLogout}
-                title="Sign Out"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer border border-transparent hover:border-rose-200"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
-            </div>
+    <div className="space-y-6">
+      {/* Success / Info Banners */}
+      {successBanner && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span className="font-medium">{successBanner}</span>
           </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
-        {/* Success / Info Banners */}
-        {successBanner && (
-          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center justify-between shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span className="font-medium">{successBanner}</span>
-            </div>
-            <button
-              onClick={() => setSuccessBanner('')}
-              className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Action Error Banner (Toast style) */}
-        {actionError && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-start justify-between shadow-xs">
-            <div className="flex items-start gap-2.5">
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold block">Action Blocked</span>
-                <span className="text-xs text-rose-700 mt-0.5 block">{actionError}</span>
-              </div>
-            </div>
-            <button
-              onClick={() => setActionError('')}
-              className="text-xs font-semibold text-rose-700 hover:text-rose-900 cursor-pointer ml-4 shrink-0"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-200/80 pb-3">
           <button
-            onClick={() => setActiveTab('drives')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
-              activeTab === 'drives'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
-            }`}
+            onClick={() => setSuccessBanner('')}
+            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 cursor-pointer"
           >
-            <Briefcase className="w-4 h-4" />
-            <span>Placement Drives</span>
+            Dismiss
           </button>
+        </div>
+      )}
 
+      {/* Action Error Banner (Toast style) */}
+      {actionError && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-start justify-between shadow-xs">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold block">Action Blocked</span>
+              <span className="text-xs text-rose-700 mt-0.5 block">{actionError}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setActionError('')}
+            className="text-xs font-semibold text-rose-700 hover:text-rose-900 cursor-pointer ml-4 shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Dashboard Introduction Section */}
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+            Placement Operations
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
+            Manage on-campus placement drives, evaluate applicants, and record verified student selection outcomes.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={() => {
-              setActiveTab('outcomes');
-              setOutcomesSubView('queue');
+              fetchDrives();
+              fetchMetrics();
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
-              activeTab === 'outcomes'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
-            }`}
+            disabled={loading || metricsLoading}
+            title="Refresh Drives"
+            aria-label="Refresh dashboard data"
+            className="p-2.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-50 min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
           >
-            <Award className="w-4 h-4" />
-            <span>Placement Outcomes</span>
-            {placementMetrics.needsVerification > 0 && (
-              <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  activeTab === 'outcomes'
-                    ? 'bg-white/20 text-white'
-                    : 'bg-amber-100 text-amber-800'
-                }`}
-              >
-                {placementMetrics.needsVerification}
-              </span>
-            )}
+            <RefreshCw className={`w-4 h-4 ${loading || metricsLoading ? 'animate-spin text-emerald-600' : ''}`} />
+          </button>
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md shadow-emerald-600/20 transition cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create Placement Drive</span>
           </button>
         </div>
+      </div>
 
-        {activeTab === 'drives' && (
-          <>
-            {/* Page Title & Primary Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Placement Drives</h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Manage on-campus placement drives, evaluate applicants, and record selection outcomes.
-            </p>
+      {/* Drive Overview Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        {/* Card 1: Total Drives */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Total Drives
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+              <Layers className="w-4 h-4" />
+            </div>
           </div>
-
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={fetchDrives}
-              disabled={loading}
-              title="Refresh Drives"
-              className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:border-slate-400 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md shadow-emerald-600/20 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Placement Drive</span>
-            </button>
+          <div className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+            {loading ? '-' : summaryMetrics.totalDrives}
           </div>
+          <div className="text-[11px] text-slate-400 mt-1">Campus drives scheduled</div>
         </div>
 
-        {/* Drive Overview Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          {/* Card 1: Total Drives */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Total Drives
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                <Layers className="w-4 h-4" />
-              </div>
+        {/* Card 2: Active Drives */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Active Drives
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-              {loading ? '-' : summaryMetrics.totalDrives}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">Campus drives scheduled</div>
           </div>
-
-          {/* Card 2: Active Drives */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Active Drives
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-600">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-teal-700">
-              {loading ? '-' : summaryMetrics.activeDrives}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">Registration currently open</div>
+          <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700">
+            {loading ? '-' : summaryMetrics.activeDrives}
           </div>
-
-          {/* Card 3: Total Applicants */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Total Applicants
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-                <Users className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
-              {loading || statsLoading ? (
-                <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
-              ) : (
-                summaryMetrics.totalApplicants
-              )}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1">Students registered across drives</div>
-          </div>
+          <div className="text-[11px] text-slate-400 mt-1">Registration currently open</div>
         </div>
 
-        {/* Verified Placement Metrics Card Group (Phase 4C) */}
-        <div className="space-y-2">
-          {metricsError ? (
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between shadow-xs">
-              <div className="flex items-center gap-2.5">
-                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-                <span>{metricsError}</span>
-              </div>
-              <button
-                onClick={fetchMetrics}
-                disabled={metricsLoading}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${metricsLoading ? 'animate-spin' : ''}`} />
-                <span>{METRIC_DESCRIPTIONS.RETRY_BUTTON}</span>
-              </button>
+        {/* Card 3: Total Applicants (Unique Students) */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Total Applicants
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700">
+              <Users className="w-4 h-4" />
             </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {/* Card 1: Verified Selections */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    {METRIC_LABELS.VERIFIED_SELECTIONS}
-                  </span>
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                    <CheckCircle2 className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
-                  {metricsLoading ? (
-                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
-                  ) : (
-                    placementMetrics.verifiedSelections
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_SELECTIONS}</div>
-              </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+            {loading || statsLoading ? (
+              <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+            ) : (
+              summaryMetrics.totalApplicants
+            )}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>Distinct students applied</span>
+            {summaryMetrics.totalApplications > 0 && (
+              <span className="font-semibold text-slate-600">
+                {summaryMetrics.totalApplications} total app{summaryMetrics.totalApplications === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
 
-              {/* Card 2: Verified Offers */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    {METRIC_LABELS.VERIFIED_OFFERS}
-                  </span>
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                    <Award className="w-4 h-4" />
-                  </div>
+      {/* Verified Placement Metrics Card Group (Phase 4C) */}
+      <div className="space-y-2">
+        {metricsError ? (
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>{metricsError}</span>
+            </div>
+            <button
+              onClick={fetchMetrics}
+              disabled={metricsLoading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${metricsLoading ? 'animate-spin' : ''}`} />
+              <span>{METRIC_DESCRIPTIONS.RETRY_BUTTON}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {/* Card 1: Verified Selections */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  {METRIC_LABELS.VERIFIED_SELECTIONS}
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <CheckCircle2 className="w-4 h-4" />
                 </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
-                  {metricsLoading ? (
-                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
-                  ) : (
-                    placementMetrics.verifiedOffers
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_OFFERS}</div>
               </div>
-
-              {/* Card 3: Highest Package */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    {METRIC_LABELS.HIGHEST_PACKAGE}
-                  </span>
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                    <IndianRupee className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
-                  {metricsLoading ? (
-                    <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
-                  ) : (
-                    placementMetrics.highestPackage?.formatted || '—'
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.HIGHEST_PACKAGE}</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                {metricsLoading ? (
+                  <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                ) : (
+                  placementMetrics.verifiedSelections
+                )}
               </div>
+              <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_SELECTIONS}</div>
+            </div>
 
-              {/* Card 4: Needs Verification */}
-              <div
-                onClick={() => {
+            {/* Card 2: Verified Offers */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  {METRIC_LABELS.VERIFIED_OFFERS}
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <Award className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                {metricsLoading ? (
+                  <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                ) : (
+                  placementMetrics.verifiedOffers
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.VERIFIED_OFFERS}</div>
+            </div>
+
+            {/* Card 3: Highest Package */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  {METRIC_LABELS.HIGHEST_PACKAGE}
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <IndianRupee className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2">
+                {metricsLoading ? (
+                  <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+                ) : (
+                  placementMetrics.highestPackage?.formatted || '—'
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">{METRIC_DESCRIPTIONS.HIGHEST_PACKAGE}</div>
+            </div>
+
+            {/* Card 4: Needs Verification */}
+            <div
+              onClick={() => {
+                setActiveTab('outcomes');
+                setOutcomesSubView('queue');
+              }}
+              className={`p-4 sm:p-5 rounded-2xl transition cursor-pointer select-none group ${
+                placementMetrics.needsVerification > 0
+                  ? 'bg-amber-50/40 border border-amber-300/80 shadow-xs hover:border-amber-400'
+                  : 'bg-white border border-slate-200/80 shadow-xs hover:border-slate-300'
+              }`}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
                   setActiveTab('outcomes');
                   setOutcomesSubView('queue');
-                }}
-                className={`p-4 sm:p-5 rounded-2xl transition cursor-pointer select-none group ${
-                  placementMetrics.needsVerification > 0
-                    ? 'bg-amber-50/40 border border-amber-300/80 shadow-xs hover:border-amber-400'
-                    : 'bg-white border border-slate-200/80 shadow-xs hover:border-slate-300'
-                }`}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setActiveTab('outcomes');
-                    setOutcomesSubView('queue');
-                  }
-                }}
-                title="Click to view applications awaiting verification"
-                aria-label="View Needs Verification queue"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <span
-                    className={`text-xs font-bold uppercase tracking-wider ${
-                      placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-500'
-                    }`}
-                  >
-                    {METRIC_LABELS.NEEDS_VERIFICATION}
-                  </span>
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                      placementMetrics.needsVerification > 0
-                        ? 'bg-amber-100 border border-amber-200 text-amber-700'
-                        : 'bg-slate-100 border border-slate-200 text-slate-500'
-                    }`}
-                  >
-                    <AlertCircle className="w-4 h-4" />
-                  </div>
-                </div>
-                <div
-                  className={`text-2xl sm:text-3xl font-extrabold flex items-center gap-2 ${
-                    placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-900'
+                }
+              }}
+              title="Click to view applications awaiting verification"
+              aria-label="View Needs Verification queue"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-500'
                   }`}
                 >
-                  {metricsLoading ? (
-                    <Loader2 className="w-5 h-5 text-amber-600 animate-spin" />
-                  ) : (
-                    placementMetrics.needsVerification
-                  )}
-                </div>
+                  {METRIC_LABELS.NEEDS_VERIFICATION}
+                </span>
                 <div
-                  className={`text-[11px] mt-1 ${
-                    placementMetrics.needsVerification > 0 ? 'text-amber-700' : 'text-slate-400'
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    placementMetrics.needsVerification > 0
+                      ? 'bg-amber-100 border border-amber-200 text-amber-700'
+                      : 'bg-slate-100 border border-slate-200 text-slate-500'
                   }`}
                 >
-                  {METRIC_DESCRIPTIONS.NEEDS_VERIFICATION}
+                  <AlertCircle className="w-4 h-4" />
                 </div>
               </div>
+              <div
+                className={`text-2xl sm:text-3xl font-extrabold flex items-center gap-2 ${
+                  placementMetrics.needsVerification > 0 ? 'text-amber-800' : 'text-slate-900'
+                }`}
+              >
+                {metricsLoading ? (
+                  <Loader2 className="w-5 h-5 text-amber-600 animate-spin" />
+                ) : (
+                  placementMetrics.needsVerification
+                )}
+              </div>
+              <div
+                className={`text-[11px] mt-1 ${
+                  placementMetrics.needsVerification > 0 ? 'text-amber-700' : 'text-slate-400'
+                }`}
+              >
+                {METRIC_DESCRIPTIONS.NEEDS_VERIFICATION}
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
-        {/* Search & Filter Toolbar */}
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200/80 pb-3">
+        <button
+          onClick={() => setActiveTab('drives')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer min-h-[44px] ${
+            activeTab === 'drives'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          <span>Placement Drives</span>
+          <span
+            className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+              activeTab === 'drives' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {summaryMetrics.totalDrives}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('outcomes');
+            setOutcomesSubView('queue');
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer min-h-[44px] ${
+            activeTab === 'outcomes'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          <span>Placement Outcomes</span>
+          {placementMetrics.needsVerification > 0 && (
+            <span
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                activeTab === 'outcomes'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {placementMetrics.needsVerification}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'drives' && (
+        <div className="space-y-5">
+          {/* Dedicated Placement Drives Center Navigation Card */}
+          <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                <Briefcase className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                  Dedicated Placement Drives Workspace
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Manage recruitment schedules, filter active and closed drives, review applicants, and coordinate attendance.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/officer/drives')}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer min-h-[38px] shrink-0"
+            >
+              <span>Open Drives Workspace</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Search & Filter Toolbar */}
         <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-lg">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -939,27 +922,27 @@ const OfficerDashboardPage = () => {
               return (
                 <div
                   key={drive._id}
-                  className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 hover:shadow-sm transition flex flex-col justify-between overflow-hidden"
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:border-slate-300 hover:shadow-sm transition flex flex-col justify-between overflow-hidden"
                 >
                   {/* Top Drive Details */}
-                  <div className="p-5 space-y-4">
-                    {/* Header: Company & Active Status */}
+                  <div className="p-4 sm:p-5 space-y-4">
+                    {/* 1. Company Header */}
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden">
                           {drive.company?.logoUrl ? (
                             <img
                               src={drive.company.logoUrl}
-                              alt={drive.company?.name}
+                              alt={drive.company?.name || 'Company'}
                               className="w-full h-full object-cover"
                             />
                           ) : (
                             <Building2 className="w-6 h-6 text-slate-400" />
                           )}
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-slate-900 text-base leading-tight">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-bold text-slate-900 text-base leading-tight truncate">
                               {drive.company?.name || 'Company Name'}
                             </h3>
                             {drive.company?.website && (
@@ -967,26 +950,31 @@ const OfficerDashboardPage = () => {
                                 href={drive.company.website}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-slate-400 hover:text-emerald-600 transition"
+                                className="text-slate-400 hover:text-emerald-600 transition shrink-0 p-0.5"
                                 title="Visit company website"
+                                aria-label={`Visit ${drive.company?.name || 'company'} website`}
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </a>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                            <span className="text-xs text-slate-500 font-medium">
+                          <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs text-slate-500">
+                            <span className="font-medium truncate">
                               {drive.company?.industry || 'Technology & Services'}
                             </span>
-                            <span className="text-slate-300">•</span>
-                            <CompanyLocation location={drive.companyLocation} className="inline-flex items-center gap-1 text-xs text-slate-500 min-w-0" iconClassName="w-3 h-3 text-slate-400 shrink-0" />
+                            <span className="text-slate-300 select-none">•</span>
+                            <CompanyLocation
+                              location={drive.companyLocation}
+                              className="inline-flex items-center gap-1 text-xs text-slate-500 min-w-0"
+                              iconClassName="w-3 h-3 text-slate-400 shrink-0"
+                            />
                           </div>
                         </div>
                       </div>
 
-                      {/* Status badge based on single source of truth */}
+                      {/* Drive status badge aligned to the right */}
                       <span
-                        className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 whitespace-nowrap self-start ${
                           driveStatus === 'archived'
                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : active
@@ -1002,76 +990,76 @@ const OfficerDashboardPage = () => {
                       </span>
                     </div>
 
-                    {/* Job Role & Compensation */}
+                    {/* 2. Job Information & Compensation */}
                     <div className="border-t border-slate-100 pt-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-slate-900">{drive.jobRole}</div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 min-h-[1.75rem]">
+                        <div className="text-sm font-bold text-slate-900 truncate">{drive.jobRole}</div>
                         {drive.packageDetails && (
-                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-100">
+                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-100 shrink-0">
                             <IndianRupee className="w-3 h-3 text-emerald-600" />
                             <span>{drive.packageDetails}</span>
                           </div>
                         )}
                       </div>
-                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                      <p className="text-xs text-slate-600 mt-1.5 line-clamp-2 min-h-[2.25rem] leading-relaxed">
                         {drive.jobDescription}
                       </p>
                     </div>
 
-                    {/* Drive Schedule Info */}
+                    {/* 3. Drive Schedule: Equal-width columns */}
                     <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 p-3 rounded-xl border border-slate-100">
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">
+                      <div className="min-w-0">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold tracking-wider truncate">
                           Drive Date
                         </span>
-                        <span className="font-semibold text-slate-800 flex items-center gap-1 mt-0.5">
-                          <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                          {formatDate(drive.driveDate)}
+                        <span className="font-semibold text-slate-800 flex items-center gap-1.5 mt-0.5 truncate">
+                          <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="truncate">{formatDate(drive.driveDate)}</span>
                         </span>
                       </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">
+                      <div className="min-w-0">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold tracking-wider truncate">
                           Registration Deadline
                         </span>
-                        <span className="font-semibold text-slate-800 flex items-center gap-1 mt-0.5">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          {formatDate(drive.registrationDeadline)}
+                        <span className="font-semibold text-slate-800 flex items-center gap-1.5 mt-0.5 truncate">
+                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{formatDate(drive.registrationDeadline)}</span>
                         </span>
                       </div>
                     </div>
 
-                    {/* Eligibility Summary Tags */}
-                    <div className="space-y-1.5 pt-1">
+                    {/* 4. Eligibility Summary Tags */}
+                    <div className="space-y-1.5 pt-0.5">
                       <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                        <span className="text-[11px] text-slate-400 font-medium">Eligibility:</span>
+                        <span className="text-[11px] text-slate-400 font-medium shrink-0">Eligibility:</span>
                         {eligibility.minTenthPercentage > 0 && (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             Min 10th: {eligibility.minTenthPercentage}%
                           </span>
                         )}
                         {eligibility.minTwelfthPercentage > 0 && (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             Min 12th: {eligibility.minTwelfthPercentage}%
                           </span>
                         )}
                         {drive.effectiveUgCriteriaType === 'PERCENTAGE' || eligibility.ugCriteriaType === 'PERCENTAGE' ? (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             Min UG: {eligibility.minUgPercentage}%
                           </span>
                         ) : drive.effectiveUgCriteriaType === 'NONE' || eligibility.ugCriteriaType === 'NONE' ? (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             UG: None
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             Min CGPA: {eligibility.minCgpa ?? 0}
                           </span>
                         )}
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                        <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                           Max Backlogs: {eligibility.maxBacklogs ?? 0}
                         </span>
                         {eligibility.requiredCourses?.length > 0 && (
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200">
+                          <span className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium border border-slate-200 shrink-0">
                             Courses: {eligibility.requiredCourses.join(', ')}
                           </span>
                         )}
@@ -1079,17 +1067,17 @@ const OfficerDashboardPage = () => {
 
                       {/* Required Skills */}
                       {eligibility.requiredSkills?.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 pt-1">
+                        <div className="flex flex-wrap items-center gap-1 pt-0.5">
                           {eligibility.requiredSkills.slice(0, 4).map((sk, idx) => (
                             <span
                               key={idx}
-                              className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-semibold border border-emerald-100"
+                              className="inline-flex items-center px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-semibold border border-emerald-100 shrink-0"
                             >
                               {sk}
                             </span>
                           ))}
                           {eligibility.requiredSkills.length > 4 && (
-                            <span className="text-[10px] text-slate-400 font-medium">
+                            <span className="text-[10px] text-slate-400 font-medium self-center">
                               +{eligibility.requiredSkills.length - 4} more
                             </span>
                           )}
@@ -1098,41 +1086,50 @@ const OfficerDashboardPage = () => {
                     </div>
                   </div>
 
-                  {/* Drive Card Footer: Stats, Archive/Delete & "View Applicants" Action */}
+                  {/* 5. Drive Card Footer: Stats & Actions */}
                   <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 text-xs">
-                      <div className="flex items-center gap-1 text-slate-700 font-semibold">
-                        <Users className="w-3.5 h-3.5 text-emerald-600" />
+                    {/* Grouped counts: applicants & selected */}
+                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                      <div className="flex items-center gap-1.5 text-slate-700 font-semibold bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                        <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                         <span>{stats.count} Applicant{stats.count === 1 ? '' : 's'}</span>
                       </div>
                       {stats.offersCount > 0 && (
-                        <div className="flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-100/60 px-2 py-0.5 rounded-md text-[11px]">
-                          <Award className="w-3 h-3 text-emerald-600" />
+                        <div className="flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 text-[11px]">
+                          <Award className="w-3 h-3 text-emerald-600 shrink-0" />
                           <span>{stats.offersCount} Selected</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {/* Archive / Restore / Delete actions based on single source of truth */}
+                    {/* Consistently aligned action buttons */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                       {driveStatus === 'archived' ? (
                         <>
                           <button
                             onClick={() => handleRestore(drive)}
                             disabled={!!actionLoading[drive._id]}
                             title="Restore drive"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer min-h-[36px] disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {actionLoading[drive._id] === 'restoring' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArchiveRestore className="w-3.5 h-3.5" />}
+                            {actionLoading[drive._id] === 'restoring' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <ArchiveRestore className="w-3.5 h-3.5" />
+                            )}
                             <span>Restore</span>
                           </button>
                           <button
                             onClick={() => handleDelete(drive)}
                             disabled={!!actionLoading[drive._id]}
                             title="Permanently delete drive"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 transition cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 transition cursor-pointer min-h-[36px] disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {actionLoading[drive._id] === 'deleting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            {actionLoading[drive._id] === 'deleting' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
                             <span>Delete</span>
                           </button>
                         </>
@@ -1142,7 +1139,7 @@ const OfficerDashboardPage = () => {
                             onClick={() => handleOpenEditModal(drive)}
                             title="Edit placement drive details"
                             aria-label={`Edit ${drive.jobRole} at ${drive.company?.name || 'Company'}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition cursor-pointer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition cursor-pointer min-h-[36px]"
                           >
                             <Pencil className="w-3.5 h-3.5 text-slate-500" />
                             <span>Edit</span>
@@ -1151,25 +1148,29 @@ const OfficerDashboardPage = () => {
                             onClick={() => handleArchive(drive)}
                             disabled={!!actionLoading[drive._id] || driveStatus !== 'closed'}
                             title={driveStatus === 'closed' ? 'Archive drive' : 'Only closed drives can be archived'}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition ${
+                            className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border transition min-h-[36px] ${
                               driveStatus === 'closed'
-                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 cursor-pointer disabled:opacity-50'
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                                 : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
                             }`}
                           >
-                            {actionLoading[drive._id] === 'archiving' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+                            {actionLoading[drive._id] === 'archiving' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Archive className="w-3.5 h-3.5" />
+                            )}
                             <span>Archive</span>
                           </button>
                           <button
                             onClick={() => setSelectedDriveForApplicants(drive)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer min-h-[36px]"
                           >
                             <Users className="w-3.5 h-3.5" />
                             <span>View Applicants</span>
                           </button>
                           <button
                             onClick={() => navigate(`/officer/drives/${drive._id}/attendance`, { state: { drive } })}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer min-h-[36px]"
                           >
                             <ClipboardCheck className="w-3.5 h-3.5" />
                             <span>Attendance</span>
@@ -1183,21 +1184,20 @@ const OfficerDashboardPage = () => {
             })}
           </div>
         )}
-          </>
-        )}
+      </div>
+      )}
 
-        {activeTab === 'outcomes' && (
-          <PlacementOutcomesSection
-            subView={outcomesSubView}
-            onSubViewChange={setOutcomesSubView}
-            drives={drives}
-            onOutcomeActionComplete={() => {
-              fetchMetrics();
-              fetchDrives();
-            }}
-          />
-        )}
-      </main>
+      {activeTab === 'outcomes' && (
+        <PlacementOutcomesSection
+          subView={outcomesSubView}
+          onSubViewChange={setOutcomesSubView}
+          drives={drives}
+          onOutcomeActionComplete={() => {
+            fetchMetrics();
+            fetchDrives();
+          }}
+        />
+      )}
 
       {/* Create Drive Modal */}
       <CreateDriveModal

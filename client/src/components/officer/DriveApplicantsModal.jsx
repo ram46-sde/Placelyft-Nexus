@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { officerService } from '../../services/officerService';
+import { formatSerialNumber } from '../../utils/applicantMetrics';
 import {
   X,
   Users,
@@ -333,9 +334,10 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
             </div>
           ) : (
             <div className="space-y-3.5">
-              {filteredApplicants.map((app) => {
+              {filteredApplicants.map((app, index) => {
                 const profile = app.academicProfile || {};
                 const isRowUpdating = updatingId === app._id;
+                const serialNo = formatSerialNumber(index);
 
                 return (
                   <div
@@ -345,8 +347,17 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                     <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                       {/* Left: Student Identity & Academic Profile */}
                       <div className="flex-1 min-w-0 space-y-2.5">
-                        {/* 1. Student Identity */}
+                        {/* 1. Student Identity with Serial Number (e.g. 01 — Aarav Sharma) */}
                         <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-mono font-bold shrink-0"
+                            title={`Applicant #${index + 1}`}
+                          >
+                            {serialNo}
+                          </span>
+                          <span className="text-slate-300 font-normal select-none" aria-hidden="true">
+                            —
+                          </span>
                           <h4 className="text-sm sm:text-base font-bold text-slate-900 truncate">
                             {app.student?.name || 'Student Candidate'}
                           </h4>

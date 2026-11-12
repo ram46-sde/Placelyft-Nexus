@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import StudentLayout from './layouts/StudentLayout';
+import OfficerLayout from './layouts/OfficerLayout';
 
 // Common Pages
 import LandingPage from './pages/LandingPage';
@@ -14,6 +15,7 @@ import RecruiterLoginPage from './pages/auth/RecruiterLoginPage';
 
 // Placement Officer Portal Pages
 import OfficerDashboardPage from './pages/officer/OfficerDashboardPage';
+import OfficerDrivesPage from './pages/officer/OfficerDrivesPage';
 import DriveAttendancePage from './pages/officer/DriveAttendancePage';
 
 // Student Portal Pages
@@ -45,9 +47,12 @@ function App() {
 
           {/* Protected Placement Officer Portal Routes */}
           <Route path="/officer" element={<ProtectedRoute allowedRoles={['placement_officer']} loginPath="/placement-officer/login" />}>
-            <Route index element={<Navigate to="/officer/dashboard" replace />} />
-            <Route path="dashboard" element={<OfficerDashboardPage />} />
-            <Route path="drives/:id/attendance" element={<DriveAttendancePage />} />
+            <Route element={<OfficerLayout />}>
+              <Route index element={<Navigate to="/officer/dashboard" replace />} />
+              <Route path="dashboard" element={<OfficerDashboardPage />} />
+              <Route path="drives" element={<OfficerDrivesPage />} />
+              <Route path="drives/:id/attendance" element={<DriveAttendancePage />} />
+            </Route>
           </Route>
           <Route path="/placement-officer/dashboard" element={<Navigate to="/officer/dashboard" replace />} />
 

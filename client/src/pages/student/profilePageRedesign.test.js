@@ -257,3 +257,260 @@ test('14. Profile Header Separation & Geometry (Issue 3)', () => {
   );
 });
 
+test('15. Change Photo Button Spacing & Interactive Area Refinement', () => {
+  // Horizontal padding approximately 20–24px (px-5 sm:px-6)
+  assert.ok(
+    content.includes('px-5 sm:px-6'),
+    'Change Photo button must have 20–24px horizontal padding (px-5 sm:px-6)'
+  );
+
+  // Vertical padding approximately 10–12px (py-2.5 sm:py-3)
+  assert.ok(
+    content.includes('py-2.5 sm:py-3'),
+    'Change Photo button must have 10–12px vertical padding (py-2.5 sm:py-3)'
+  );
+
+  // Balanced icon and text spacing
+  assert.ok(
+    content.includes('gap-2.5'),
+    'Change Photo button must provide balanced spacing (gap-2.5) between camera icon and label'
+  );
+
+  // Consistent min-height of 44px
+  assert.ok(
+    content.includes('min-h-[44px]'),
+    'Change Photo button must adhere to min-h-[44px] comfortable touch target'
+  );
+
+  // Hover, focus and active states
+  assert.ok(
+    content.includes('hover:bg-slate-50'),
+    'Change Photo button must provide clear hover feedback'
+  );
+  assert.ok(
+    content.includes('focus:ring-2 focus:ring-indigo-500/20'),
+    'Change Photo button must support accessible focus ring'
+  );
+  assert.ok(
+    content.includes('active:bg-slate-100'),
+    'Change Photo button must provide active feedback on click'
+  );
+
+  // Spaced helper text underneath
+  assert.ok(
+    content.includes('Supported: JPEG, PNG, WebP (Max 5 MB)'),
+    'Supported file types and size limit must be displayed beneath button'
+  );
+});
+
+test('16. Campus-Tech Premium Theme Palette & Visual Elements', () => {
+  // Deep Indigo (#312E81) & Primary Violet (#7C3AED) banner gradient
+  assert.ok(
+    content.includes('from-[#312E81] via-indigo-900 to-[#7C3AED]'),
+    'Banner must utilize the Campus-Tech deep indigo to primary violet gradient'
+  );
+
+  // Teal Accent (#0D9488) in positive states (Verified Student badge, resume badge)
+  assert.ok(
+    content.includes('variant="teal"'),
+    'Must apply teal accent to positive status badges'
+  );
+
+  // Soft Background (#F1F5F9) & subtle slate borders
+  assert.ok(
+    content.includes('#F1F5F9'),
+    'Must incorporate soft background (#F1F5F9) for secondary surfaces and sub-cards'
+  );
+
+  // Generous section spacing
+  assert.ok(
+    content.includes('space-y-8'),
+    'Sections must use generous space-y-8 layout breathing room'
+  );
+});
+
+test('17. Profile Photo UI Correction: Change Photo Button Positioned Completely Below Gradient Banner (Issue 1)', () => {
+  // Top row wrapper container must not have negative top margins that push controls into the banner
+  assert.ok(
+    content.includes('flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5'),
+    'Top row container must use clean alignment without negative margin pulling entire row into banner'
+  );
+
+  // Negative top margin is strictly scoped to the circular avatar
+  assert.ok(
+    content.includes('-mt-14 sm:-mt-16 relative z-10 group shrink-0'),
+    'Negative margin must be strictly scoped to circular avatar to overlap banner'
+  );
+
+  // Photo controls container has positive padding and sits fully on card surface
+  assert.ok(
+    content.includes('pt-3 sm:pt-4 relative z-10 w-full sm:w-auto flex flex-col sm:items-end gap-2'),
+    'Photo controls container must use positive padding on white card surface below banner'
+  );
+
+  // Both idle state and preview states are housed with min 44px height and comfortable padding
+  assert.ok(
+    content.includes('min-h-[44px]'),
+    'All photo actions must maintain minimum 44px interactive height'
+  );
+  assert.ok(
+    content.includes('px-5 sm:px-6 py-2.5 sm:py-3'),
+    'Change Photo and Confirm Upload buttons must have 20–24px horizontal and 10–12px vertical padding'
+  );
+  assert.ok(
+    content.includes('Supported: JPEG, PNG, WebP (Max 5 MB)'),
+    'Supported file types helper text must be clearly spaced below button'
+  );
+
+  // handleUploadPhoto updates AuthContext studentProfile so navbar immediately reflects new photo
+  assert.ok(
+    content.includes('setStudentProfile((prev) => ({'),
+    'handleUploadPhoto must update studentProfile in AuthContext immediately upon upload'
+  );
+  assert.ok(
+    content.includes('profilePhotoUrl: newPhotoUrl'),
+    'handleUploadPhoto must attach newPhotoUrl to studentProfile'
+  );
+});
+
+test('18. Profile Photo UI Correction: StudentLayout Top-Right Avatar Upgraded to 48px Profile Photo with Fallback (Issue 2)', () => {
+  const studentLayoutPath = path.resolve(__dirname, '../../layouts/StudentLayout.jsx');
+  assert.ok(fs.existsSync(studentLayoutPath), 'StudentLayout.jsx must exist');
+  const studentLayoutContent = fs.readFileSync(studentLayoutPath, 'utf8');
+
+  // Guard test: Absolute prohibition of banned wording in StudentLayout
+  const lines = studentLayoutContent.split('\n');
+  const bannedRegex = /\b(placed|joined|employed|offers accepted)\b/i;
+  lines.forEach((line, idx) => {
+    assert.ok(
+      !bannedRegex.test(line),
+      `Banned wording found in StudentLayout.jsx:${idx + 1}: ${line.trim()}`
+    );
+  });
+
+  // Guard test: No hand-built LPA or Cr strings in StudentLayout
+  const lpaCrRegex = /['"`][^'"`\n]*\b(?:LPA|Cr)\b[^'"`\n]*['"`]/;
+  lines.forEach((line, idx) => {
+    assert.ok(
+      !lpaCrRegex.test(line),
+      `Hand-built LPA/Cr string found in StudentLayout.jsx:${idx + 1}: ${line.trim()}`
+    );
+  });
+
+  // Derives avatar from authenticated student profile or user data
+  assert.ok(
+    studentLayoutContent.includes('avatarPhotoUrl = studentProfile?.profilePhotoUrl || user?.profilePhotoUrl || null'),
+    'Must source avatar photo URL from authenticated studentProfile or user'
+  );
+
+  // Resets image load error state when avatarPhotoUrl changes (e.g. after fresh upload)
+  assert.ok(
+    studentLayoutContent.includes('setAvatarImgError(false)'),
+    'Must reset avatar image error state on avatarPhotoUrl change'
+  );
+
+  // Upgraded avatar size: 48–52px (w-12 h-12 = 48px) with circular crop and object-cover
+  assert.ok(
+    studentLayoutContent.includes('w-12 h-12 rounded-full object-cover'),
+    'Avatar must use 48px (w-12 h-12) dimensions with object-cover and circular styling'
+  );
+
+  // Error fallback handler on image
+  assert.ok(
+    studentLayoutContent.includes('onError={() => setAvatarImgError(true)}'),
+    'Avatar img element must include onError handler to trigger fallback'
+  );
+
+  // Initials fallback when no photo exists or image fails to load
+  assert.ok(
+    studentLayoutContent.includes("user?.name?.charAt(0).toUpperCase() || 'S'"),
+    'Must provide circular initials fallback when photo is absent or errors'
+  );
+
+  // Preserves student name, department subtitle, and dropdown toggle
+  assert.ok(
+    studentLayoutContent.includes("{user?.name || 'Student'}"),
+    'Must preserve student name in header profile menu'
+  );
+  assert.ok(
+    studentLayoutContent.includes('{departmentLabel}'),
+    'Must preserve department subtitle in header profile menu'
+  );
+  assert.ok(
+    studentLayoutContent.includes('ChevronDown'),
+    'Must preserve ChevronDown dropdown toggle'
+  );
+
+  // No dummy or hardcoded photo URLs
+  assert.ok(
+    !studentLayoutContent.includes('placeholder.com') &&
+    !studentLayoutContent.includes('unsplash.com') &&
+    !studentLayoutContent.includes('via.placeholder'),
+    'Must not use any dummy or hardcoded photo URLs'
+  );
+});
+
+test('19. Critical Fix Priority 1: Authorization Protection & Stricter Student Role Guarding', () => {
+  // Guard must check !user and user.role !== 'student' before allowing fetchProfile to execute
+  assert.ok(
+    content.includes('if (!user)'),
+    'fetchProfile effect must guard against unhydrated/null user before querying'
+  );
+  assert.ok(
+    content.includes("user.role !== 'student'"),
+    'fetchProfile effect must strictly guard against non-student roles'
+  );
+
+  // handleUploadPhoto must guard against non-student role
+  assert.ok(
+    content.includes("if (!user || user.role !== 'student') return;"),
+    'handleUploadPhoto must guard against execution without verified student session'
+  );
+
+  // Officer fallback notice includes direct Sign Out action to clear cross-role session
+  assert.ok(
+    content.includes('Sign Out') && content.includes('onClick={logout}'),
+    'Officer notice card must provide a Sign Out action to clear session'
+  );
+});
+
+test('20. Critical Fix Priority 2: Canonical Photo URL Unification Across Large Avatar and StudentLayout', () => {
+  // ProfilePage derives canonicalPhotoUrl from preview, formData, studentProfile, or user
+  assert.ok(
+    content.includes('canonicalPhotoUrl'),
+    'ProfilePage must define canonicalPhotoUrl uniting local and context sources'
+  );
+  assert.ok(
+    content.includes('studentProfile?.profilePhotoUrl'),
+    'ProfilePage must check studentProfile?.profilePhotoUrl from AuthContext'
+  );
+
+  // ProfilePage synchronizes studentProfile?.profilePhotoUrl into formData
+  assert.ok(
+    content.includes('studentProfile?.profilePhotoUrl && !formData.profilePhotoUrl'),
+    'ProfilePage must sync studentProfile photo into formData when available'
+  );
+
+  // Large avatar uses canonicalPhotoUrl and handles image load errors
+  assert.ok(
+    content.includes('canonicalPhotoUrl && !avatarImgError'),
+    'Large avatar must display canonicalPhotoUrl when present and free of error'
+  );
+  assert.ok(
+    content.includes('onError={() => setAvatarImgError(true)}'),
+    'Large avatar must set error state when image fails to load'
+  );
+
+  // Large avatar falls back to initials
+  assert.ok(
+    content.includes("user?.name?.charAt(0).toUpperCase() || 'S'"),
+    'Large avatar must fall back to initials if photo is absent or fails'
+  );
+
+  // Button text dynamically responds to canonicalPhotoUrl
+  assert.ok(
+    content.includes("canonicalPhotoUrl ? 'Change Photo' : 'Upload Photo'"),
+    'Change Photo button label must inspect canonical photo existence'
+  );
+});
+

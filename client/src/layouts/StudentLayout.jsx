@@ -73,6 +73,15 @@ const StudentLayout = () => {
 
   const departmentLabel = getDepartmentLabel(studentProfile);
 
+  // Authenticated student profile photo URL with fallback
+  const avatarPhotoUrl = studentProfile?.profilePhotoUrl || user?.profilePhotoUrl || null;
+  const [avatarImgError, setAvatarImgError] = useState(false);
+
+  // Reset image error state whenever avatar URL changes (e.g. after fresh upload or login)
+  useEffect(() => {
+    setAvatarImgError(false);
+  }, [avatarPhotoUrl]);
+
   // Desktop sidebar collapsed state with try/catch-guarded localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
@@ -422,11 +431,20 @@ const StudentLayout = () => {
                   aria-expanded={profileMenuOpen}
                   aria-haspopup="true"
                   aria-label="User profile menu"
-                  className="flex items-center gap-2.5 p-1.5 sm:px-3 sm:py-1.5 rounded-lg hover:bg-slate-100 transition duration-150 ease-in-out min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
+                  className="flex items-center gap-2.5 p-1 sm:px-2.5 sm:py-1 rounded-xl hover:bg-slate-100 transition duration-150 ease-in-out min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
                 >
-                  <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                    {user?.name?.charAt(0).toUpperCase() || 'S'}
-                  </div>
+                  {avatarPhotoUrl && !avatarImgError ? (
+                    <img
+                      src={avatarPhotoUrl}
+                      alt={user?.name || 'Student profile photo'}
+                      onError={() => setAvatarImgError(true)}
+                      className="w-12 h-12 rounded-full object-cover ring-2 ring-indigo-100 shrink-0 border border-slate-200 shadow-2xs"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-700 to-violet-600 text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs ring-2 ring-indigo-100">
+                      {user?.name?.charAt(0).toUpperCase() || 'S'}
+                    </div>
+                  )}
                   <div className="hidden sm:block text-left min-w-0 max-w-[150px]">
                     <div className="text-xs font-semibold text-slate-800 truncate" title={user?.name || 'Student'}>
                       {user?.name || 'Student'}
@@ -580,9 +598,18 @@ const StudentLayout = () => {
             {/* User Profile Card inside Drawer */}
             <div className="p-4 border-b border-slate-100 bg-slate-50/50">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shrink-0">
-                  {user?.name?.charAt(0).toUpperCase() || 'S'}
-                </div>
+                {avatarPhotoUrl && !avatarImgError ? (
+                  <img
+                    src={avatarPhotoUrl}
+                    alt={user?.name || 'Student profile photo'}
+                    onError={() => setAvatarImgError(true)}
+                    className="w-12 h-12 rounded-full object-cover ring-2 ring-indigo-100 shrink-0 border border-slate-200 shadow-2xs"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-700 to-violet-600 text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs ring-2 ring-indigo-100">
+                    {user?.name?.charAt(0).toUpperCase() || 'S'}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-slate-800 truncate">
                     {user?.name || 'Student'}
