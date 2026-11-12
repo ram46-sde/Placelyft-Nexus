@@ -5,6 +5,7 @@ import { officerService } from '../../services/officerService';
 import { normalizePlacementMetrics } from '../../utils/placementMetrics';
 import { METRIC_LABELS, METRIC_DESCRIPTIONS } from '../../constants/placementMetrics';
 import CreateDriveModal from '../../components/officer/CreateDriveModal';
+import EditDriveModal from '../../components/officer/EditDriveModal';
 import DriveApplicantsModal from '../../components/officer/DriveApplicantsModal';
 import PlacementOutcomesSection from '../../components/officer/PlacementOutcomesSection';
 import CompanyLocation from '../../components/common/CompanyLocation';
@@ -31,6 +32,7 @@ import {
   ArchiveRestore,
   Trash2,
   ClipboardCheck,
+  Pencil,
 } from 'lucide-react';
 
 /**
@@ -128,6 +130,8 @@ const OfficerDashboardPage = () => {
   // Modals state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedDriveForApplicants, setSelectedDriveForApplicants] = useState(null);
+  const [selectedDriveForEdit, setSelectedDriveForEdit] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Stage B & 4C: Verified Placement Metrics State
   const [placementMetrics, setPlacementMetrics] = useState({
@@ -260,6 +264,34 @@ const OfficerDashboardPage = () => {
     }));
     setSuccessBanner(`Drive for "${newDrive.company?.name || newDrive.jobRole}" created successfully.`);
     setTimeout(() => setSuccessBanner(''), 4000);
+  };
+
+  // Handlers for Edit Drive Modal
+  const handleOpenEditModal = (drive) => {
+    setSelectedDriveForEdit(drive);
+    setIsEditModalOpen(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false);
+    setSelectedDriveForEdit(null);
+  };
+
+  const handleDriveUpdated = async (updatedDrive) => {
+    setIsEditModalOpen(false);
+    setSelectedDriveForEdit(null);
+
+    const displayName = updatedDrive?.company?.name || updatedDrive?.jobRole || 'Drive';
+    setSuccessBanner(`Placement drive for "${displayName}" updated successfully.`);
+    setTimeout(() => setSuccessBanner(''), 4000);
+
+    try {
+      await fetchDrives();
+    } catch (refreshErr) {
+      console.error('Error refreshing drives after update:', refreshErr);
+      setActionError('Drive was saved, but refreshing the dashboard list failed. Please reload the page.');
+      setTimeout(() => setActionError(''), 5000);
+    }
   };
 
   // Handler when an applicant's status is updated from the applicant roster modal
@@ -1107,6 +1139,15 @@ const OfficerDashboardPage = () => {
                       ) : (
                         <>
                           <button
+                            onClick={() => handleOpenEditModal(drive)}
+                            title="Edit placement drive details"
+                            aria-label={`Edit ${drive.jobRole} at ${drive.company?.name || 'Company'}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Edit</span>
+                          </button>
+                          <button
                             onClick={() => handleArchive(drive)}
                             disabled={!!actionLoading[drive._id] || driveStatus !== 'closed'}
                             title={driveStatus === 'closed' ? 'Archive drive' : 'Only closed drives can be archived'}
@@ -1163,6 +1204,14 @@ const OfficerDashboardPage = () => {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onDriveCreated={handleDriveCreated}
+      />
+
+      {/* Edit Drive Modal */}
+      <EditDriveModal
+        isOpen={isEditModalOpen}
+        drive={selectedDriveForEdit}
+        onClose={handleCloseEditModal}
+        onSuccess={handleDriveUpdated}
       />
 
       {/* Applicant Roster Modal */}

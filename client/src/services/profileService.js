@@ -15,11 +15,7 @@ export const profileService = {
 
   // Upload student profile photo
   uploadProfilePhoto: async (formData) => {
-    const response = await api.post('/student/profile/photo', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await api.post('/student/profile/photo', formData);
     return response.data;
   },
 };

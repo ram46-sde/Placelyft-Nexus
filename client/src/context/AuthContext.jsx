@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '../services/authService';
+import { profileService } from '../services/profileService';
 
 const AuthContext = createContext(null);
 
@@ -11,6 +12,38 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem('cpms_token') || null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [studentProfile, setStudentProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Fetch student profile once when authenticated student is active
+  useEffect(() => {
+    let isMounted = true;
+    const isStudent = user?._id && user?.role === 'student';
+    if (isStudent && token) {
+      setProfileLoading(true);
+      profileService
+        .getProfile()
+        .then((data) => {
+          if (isMounted && data && data.success && data.profile) {
+            setStudentProfile(data.profile);
+          }
+        })
+        .catch(() => {
+          // Fallback handled cleanly by getDepartmentLabel
+        })
+        .finally(() => {
+          if (isMounted) {
+            setProfileLoading(false);
+          }
+        });
+    } else {
+      setStudentProfile(null);
+      setProfileLoading(false);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [user?._id, user?.role, token]);
 
   // Hydrate user session on initial load
   useEffect(() => {
@@ -81,6 +114,8 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('cpms_token');
     localStorage.removeItem('cpms_user');
     setUser(null);
+    setStudentProfile(null);
+    setProfileLoading(false);
     setToken(null);
     setError(null);
   };
@@ -97,6 +132,9 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
+        studentProfile,
+        setStudentProfile,
+        profileLoading,
       }}
     >
       {children}

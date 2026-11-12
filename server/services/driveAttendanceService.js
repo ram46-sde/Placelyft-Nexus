@@ -6,6 +6,7 @@ const StudentProfile = require('../models/StudentProfile');
 const User = require('../models/User');
 const { resolveDepartment, fetchCollegeDepartments, UNASSIGNED_LABEL } = require('../utils/departmentResolver');
 const { getDriveLifecycleStatus } = require('../utils/driveLifecycle');
+const departmentCoordination = require('../utils/departmentCoordination');
 
 const ALLOWED_STATUSES = ['Pending', 'Present', 'Absent'];
 const MAX_BATCH_ENTRIES = 200;
@@ -430,211 +431,287 @@ async function markDriveAttendanceService({ driveId, collegeId, officerUser, ent
     if (p.user) profileMap.set(p.user.toString(), p);
   });
 
-  // 7. Apply mutations per entry (using upsert + CAS without transactions)
-  const results = [];
-  const serverTime = new Date();
-
+  // 6b. Determine all unique department IDs required by this attendance operation
+  const requiredDeptIds = new Set();
   for (const entry of entries) {
-    const { applicationId, status: requestedStatus } = entry;
-    const appIdStr = applicationId.toString();
-    const app = appMap.get(appIdStr);
-
-    // Read existing record
-    let existing = await DriveAttendance.findOne({ application: applicationId });
-
-    if (!existing) {
-      // Case A: No existing record
-      if (requestedStatus === 'Pending') {
-        // Pending on an unmarked applicant is a no-op: creates nothing, writes no history
-        results.push({
-          applicationId: appIdStr,
-          result: 'noop',
-          status: 'Pending',
-        });
-        continue;
-      }
-
-      // First mark (Present or Absent): resolve snapshot
+    const app = appMap.get(entry.applicationId.toString());
+    if (app && app.student) {
       const profile = profileMap.get(app.student.toString());
       const resolved = resolveDepartment(profile, departments);
-
-      const firstHistoryEntry = {
-        action: 'MARK_ATTENDANCE',
-        oldStatus: 'Pending',
-        newStatus: requestedStatus,
-        changedBy: officerUser._id,
-        changedAt: serverTime,
-        onBehalfOf: 'HOD',
-        note: null,
-      };
-
-      try {
-        const createdRecord = await DriveAttendance.findOneAndUpdate(
-          { application: applicationId },
-          {
-            $setOnInsert: {
-              collegeId,
-              placementDrive: drive._id,
-              student: app.student,
-              application: applicationId,
-              departmentId: resolved.departmentId || null,
-              departmentName: resolved.departmentName,
-              departmentResolutionStatus: resolved.status,
-              status: requestedStatus,
-              markedBy: officerUser._id,
-              markedAt: serverTime,
-              markedOnBehalfOf: 'HOD',
-              history: [firstHistoryEntry],
-            },
-          },
-          { upsert: true, new: false } // returns null if inserted
-        );
-
-        if (!createdRecord) {
-          // Successfully inserted!
-          results.push({
-            applicationId: appIdStr,
-            result: 'created',
-            status: requestedStatus,
-          });
-          continue;
-        } else {
-          // Already existed when upsert ran; fall through to CAS update
-          existing = createdRecord;
-        }
-      } catch (upsertErr) {
-        if (upsertErr.code === 11000) {
-          // Duplicate key collision due to concurrent insert; reload and handle as update
-          existing = await DriveAttendance.findOne({ application: applicationId });
-        } else {
-          throw upsertErr;
-        }
+      if (resolved && resolved.departmentId) {
+        requiredDeptIds.add(resolved.departmentId.toString());
       }
     }
+  }
 
-    // Case B: Existing record (or fallen through from concurrent upsert)
-    if (existing) {
-      if (existing.status === requestedStatus) {
-        // Same status as current: unchanged (no history entry, no markedAt change)
-        results.push({
-          applicationId: appIdStr,
-          result: 'unchanged',
-          status: requestedStatus,
-        });
-        continue;
-      }
+  // Also include any departmentId from existing attendance records for applications in this batch
+  const existingAttendanceRecords = await DriveAttendance.find(
+    { application: { $in: appIds }, collegeId },
+    { application: 1, departmentId: 1 }
+  ).lean();
+  for (const rec of existingAttendanceRecords) {
+    if (rec.departmentId) {
+      requiredDeptIds.add(rec.departmentId.toString());
+    }
+  }
 
-      // Status differs: execute atomic Compare-and-Set (CAS) update
-      const casHistoryEntry = {
-        action: 'MARK_ATTENDANCE',
-        oldStatus: existing.status,
-        newStatus: requestedStatus,
-        changedBy: officerUser._id,
-        changedAt: serverTime,
-        onBehalfOf: 'HOD',
-        note: null,
+  const deptIdsToAcquire = Array.from(requiredDeptIds);
+
+  // 6c. Acquire writer tokens for all required departments BEFORE any attendance write
+  let acquiredTokens = [];
+  if (deptIdsToAcquire.length > 0) {
+    const batchTokenRes = await departmentCoordination.acquireBatchWriterTokens({
+      departmentIds: deptIdsToAcquire,
+      collegeId,
+    });
+
+    if (!batchTokenRes.success) {
+      return {
+        status: 409,
+        error: {
+          code: batchTokenRes.code || 'DEPARTMENT_DELETION_CONFLICT',
+          message:
+            batchTokenRes.message ||
+            'Cannot mark attendance: A required department is closing for deletion or inactive.',
+          failedDepartmentId: batchTokenRes.failedDepartmentId || null,
+        },
       };
+    }
 
-      const casUpdated = await DriveAttendance.findOneAndUpdate(
-        {
-          _id: existing._id,
-          status: existing.status, // CAS condition: must match read status
-        },
-        {
-          $set: {
-            status: requestedStatus,
-            markedBy: officerUser._id,
-            markedAt: serverTime,
-            markedOnBehalfOf: 'HOD',
-          },
-          $push: {
-            history: casHistoryEntry,
-          },
-        },
-        { new: true }
-      );
+    acquiredTokens = batchTokenRes.tokens || [];
+  }
 
-      if (casUpdated) {
-        results.push({
-          applicationId: appIdStr,
-          result: 'changed',
-          status: requestedStatus,
-        });
-      } else {
-        // CAS failed due to concurrent modification! Re-read and retry once
-        const reRead = await DriveAttendance.findById(existing._id);
-        if (!reRead) {
+  // 7. Apply mutations per entry (using upsert + CAS without transactions)
+  // Hold acquired tokens until write operation finishes; release in finally block
+  let serviceResponse = null;
+
+  try {
+    const results = [];
+    const serverTime = new Date();
+
+    for (const entry of entries) {
+      const { applicationId, status: requestedStatus } = entry;
+      const appIdStr = applicationId.toString();
+      const app = appMap.get(appIdStr);
+
+      // Read existing record
+      let existing = await DriveAttendance.findOne({ application: applicationId });
+
+      if (!existing) {
+        // Case A: No existing record
+        if (requestedStatus === 'Pending') {
+          // Pending on an unmarked applicant is a no-op: creates nothing, writes no history
           results.push({
             applicationId: appIdStr,
-            result: 'conflict',
-            status: existing.status,
+            result: 'noop',
+            status: 'Pending',
           });
-        } else if (reRead.status === requestedStatus) {
-          // Concurrent update already set it to requested status
+          continue;
+        }
+
+        // First mark (Present or Absent): resolve snapshot
+        const profile = profileMap.get(app.student.toString());
+        const resolved = resolveDepartment(profile, departments);
+
+        const firstHistoryEntry = {
+          action: 'MARK_ATTENDANCE',
+          oldStatus: 'Pending',
+          newStatus: requestedStatus,
+          changedBy: officerUser._id,
+          changedAt: serverTime,
+          onBehalfOf: 'HOD',
+          note: null,
+        };
+
+        try {
+          const createdRecord = await DriveAttendance.findOneAndUpdate(
+            { application: applicationId },
+            {
+              $setOnInsert: {
+                collegeId,
+                placementDrive: drive._id,
+                student: app.student,
+                application: applicationId,
+                departmentId: resolved.departmentId || null,
+                departmentName: resolved.departmentName,
+                departmentResolutionStatus: resolved.status,
+                status: requestedStatus,
+                markedBy: officerUser._id,
+                markedAt: serverTime,
+                markedOnBehalfOf: 'HOD',
+                history: [firstHistoryEntry],
+              },
+            },
+            { upsert: true, new: false } // returns null if inserted
+          );
+
+          if (!createdRecord) {
+            // Successfully inserted!
+            results.push({
+              applicationId: appIdStr,
+              result: 'created',
+              status: requestedStatus,
+            });
+            continue;
+          } else {
+            // Already existed when upsert ran; fall through to CAS update
+            existing = createdRecord;
+          }
+        } catch (upsertErr) {
+          if (upsertErr.code === 11000) {
+            // Duplicate key collision due to concurrent insert; reload and handle as update
+            existing = await DriveAttendance.findOne({ application: applicationId });
+          } else {
+            throw upsertErr;
+          }
+        }
+      }
+
+      // Case B: Existing record (or fallen through from concurrent upsert)
+      if (existing) {
+        if (existing.status === requestedStatus) {
+          // Same status as current: unchanged (no history entry, no markedAt change)
           results.push({
             applicationId: appIdStr,
             result: 'unchanged',
             status: requestedStatus,
           });
-        } else {
-          // Try CAS update one more time against new status
-          const retryTime = new Date();
-          const retryHistoryEntry = {
-            action: 'MARK_ATTENDANCE',
-            oldStatus: reRead.status,
-            newStatus: requestedStatus,
-            changedBy: officerUser._id,
-            changedAt: retryTime,
-            onBehalfOf: 'HOD',
-            note: null,
-          };
+          continue;
+        }
 
-          const retryUpdated = await DriveAttendance.findOneAndUpdate(
-            {
-              _id: reRead._id,
-              status: reRead.status,
-            },
-            {
-              $set: {
-                status: requestedStatus,
-                markedBy: officerUser._id,
-                markedAt: retryTime,
-                markedOnBehalfOf: 'HOD',
-              },
-              $push: {
-                history: retryHistoryEntry,
-              },
-            },
-            { new: true }
-          );
+        // Status differs: execute atomic Compare-and-Set (CAS) update
+        const casHistoryEntry = {
+          action: 'MARK_ATTENDANCE',
+          oldStatus: existing.status,
+          newStatus: requestedStatus,
+          changedBy: officerUser._id,
+          changedAt: serverTime,
+          onBehalfOf: 'HOD',
+          note: null,
+        };
 
-          if (retryUpdated) {
-            results.push({
-              applicationId: appIdStr,
-              result: 'changed',
+        const casUpdated = await DriveAttendance.findOneAndUpdate(
+          {
+            _id: existing._id,
+            status: existing.status, // CAS condition: must match read status
+          },
+          {
+            $set: {
               status: requestedStatus,
-            });
-          } else {
-            // Consecutive race condition failure; report conflict
+              markedBy: officerUser._id,
+              markedAt: serverTime,
+              markedOnBehalfOf: 'HOD',
+            },
+            $push: {
+              history: casHistoryEntry,
+            },
+          },
+          { new: true }
+        );
+
+        if (casUpdated) {
+          results.push({
+            applicationId: appIdStr,
+            result: 'changed',
+            status: requestedStatus,
+          });
+        } else {
+          // CAS failed due to concurrent modification! Re-read and retry once
+          const reRead = await DriveAttendance.findById(existing._id);
+          if (!reRead) {
             results.push({
               applicationId: appIdStr,
               result: 'conflict',
-              status: reRead.status,
+              status: existing.status,
             });
+          } else if (reRead.status === requestedStatus) {
+            // Concurrent update already set it to requested status
+            results.push({
+              applicationId: appIdStr,
+              result: 'unchanged',
+              status: requestedStatus,
+            });
+          } else {
+            // Try CAS update one more time against new status
+            const retryTime = new Date();
+            const retryHistoryEntry = {
+              action: 'MARK_ATTENDANCE',
+              oldStatus: reRead.status,
+              newStatus: requestedStatus,
+              changedBy: officerUser._id,
+              changedAt: retryTime,
+              onBehalfOf: 'HOD',
+              note: null,
+            };
+
+            const retryUpdated = await DriveAttendance.findOneAndUpdate(
+              {
+                _id: reRead._id,
+                status: reRead.status,
+              },
+              {
+                $set: {
+                  status: requestedStatus,
+                  markedBy: officerUser._id,
+                  markedAt: retryTime,
+                  markedOnBehalfOf: 'HOD',
+                },
+                $push: {
+                  history: retryHistoryEntry,
+                },
+              },
+              { new: true }
+            );
+
+            if (retryUpdated) {
+              results.push({
+                applicationId: appIdStr,
+                result: 'changed',
+                status: requestedStatus,
+              });
+            } else {
+              // Consecutive race condition failure; report conflict
+              results.push({
+                applicationId: appIdStr,
+                result: 'conflict',
+                status: reRead.status,
+              });
+            }
           }
+        }
+      }
+    }
+
+    serviceResponse = {
+      status: 200,
+      data: {
+        success: true,
+        message: 'Attendance processed successfully.',
+        results,
+      },
+    };
+  } finally {
+    if (acquiredTokens.length > 0) {
+      const releaseRes = await departmentCoordination.releaseBatchWriterTokens({
+        tokens: acquiredTokens,
+        collegeId,
+      });
+
+      if (!releaseRes.success) {
+        console.error('[Attendance Cleanup Failure]: Failed to release some department writer tokens:', releaseRes);
+      }
+
+      if (serviceResponse && serviceResponse.data) {
+        serviceResponse.data.cleanup = releaseRes;
+        if (!releaseRes.success) {
+          serviceResponse.data.warning =
+            'One or more department writer tokens could not be released during cleanup.';
         }
       }
     }
   }
 
-  return {
-    status: 200,
-    data: {
-      success: true,
-      message: 'Attendance processed successfully.',
-      results,
-    },
-  };
+  return serviceResponse;
 }
 
 module.exports = {

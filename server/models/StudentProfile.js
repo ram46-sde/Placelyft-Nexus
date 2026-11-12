@@ -39,6 +39,17 @@ const studentProfileSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Additive fields (Feature 01: Enhanced Student Details Panel)
+    section: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    academicYear: {
+      type: String,
+      enum: ['I', 'II', 'III', 'IV', null],
+      default: null,
+    },
     cgpa: {
       type: Number,
       min: 0,

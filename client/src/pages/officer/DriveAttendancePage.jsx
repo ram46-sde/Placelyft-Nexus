@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { officerService } from '../../services/officerService';
@@ -76,6 +76,71 @@ const formatDateTime = (dateString) => {
   });
 };
 
+/**
+ * Shared attendance roster column definitions.
+ * This single configuration drives both table header (<th>) and body cells (<td>)
+ * to guarantee pixel-perfect column alignment.
+ */
+const ATTENDANCE_TABLE_COLUMNS = [
+  {
+    id: 'select',
+    label: '',
+    headerClassName: 'w-10 px-4 py-2.5 text-center',
+    cellClassName: 'w-10 px-4 py-3 text-center align-middle',
+    isConditional: true, // Included only for non-archived drives
+  },
+  {
+    id: 'studentName',
+    label: 'Student Name',
+    headerClassName: 'px-4 py-2.5 text-left font-semibold min-w-[160px]',
+    cellClassName: 'px-4 py-3 text-left align-middle min-w-[160px]',
+  },
+  {
+    id: 'rollNumber',
+    label: 'Roll Number',
+    headerClassName: 'w-28 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-28 px-3 py-3 text-left align-middle',
+  },
+  {
+    id: 'department',
+    label: 'Department',
+    headerClassName: 'w-36 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-36 px-3 py-3 text-left align-middle',
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    headerClassName: 'w-24 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-24 px-3 py-3 text-left align-middle',
+  },
+  {
+    id: 'markedBy',
+    label: 'Marked By',
+    headerClassName: 'w-32 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-32 px-3 py-3 text-left align-middle',
+  },
+  {
+    id: 'markedAt',
+    label: 'Marked At',
+    headerClassName: 'w-36 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-36 px-3 py-3 text-left align-middle',
+  },
+  {
+    id: 'actions',
+    label: 'Actions',
+    headerClassName: 'w-24 px-3 py-2.5 text-left font-semibold',
+    cellClassName: 'w-24 px-3 py-3 text-left align-middle',
+  },
+];
+
+/**
+ * Resolves active table columns based on drive lifecycle status.
+ * Excludes the select/checkbox column for archived drives.
+ */
+const getActiveAttendanceColumns = ({ isArchived = false } = {}) => {
+  return ATTENDANCE_TABLE_COLUMNS.filter((col) => !isArchived || !col.isConditional);
+};
+
 const DriveAttendancePage = () => {
   const { id: driveId } = useParams();
   const navigate = useNavigate();
@@ -112,8 +177,8 @@ const DriveAttendancePage = () => {
   const [expandedHistory, setExpandedHistory] = useState(new Set());
   const [historyLoading, setHistoryLoading] = useState(new Set());
 
-  // Inline department management panel
-  const [showDeptPanel, setShowDeptPanel] = useState(null); // 'hod' | 'aliases' | null
+  // Inline unified department management panel
+  const [isDeptPanelOpen, setIsDeptPanelOpen] = useState(false);
 
   // Modals & Popovers
   const [showShareModal, setShowShareModal] = useState(false);
@@ -123,6 +188,12 @@ const DriveAttendancePage = () => {
 
   // Track if drive is archived (read-only)
   const isArchived = driveInfo?.isArchived || driveInfo?.status === 'archived';
+
+  // Active table columns computed from shared configuration
+  const activeColumns = useMemo(
+    () => getActiveAttendanceColumns({ isArchived }),
+    [isArchived]
+  );
 
   const toastTimeoutRef = useRef(null);
   const showToast = useCallback((type, message, duration = 5000) => {
@@ -519,6 +590,139 @@ const DriveAttendancePage = () => {
     );
   }
 
+  // Helper to render cell contents for the shared table column configuration
+  const renderApplicantCell = (
+    columnId,
+    applicant,
+    { isSelected, isHistoryExpanded, isHistoryLoadingItem, statusBadge }
+  ) => {
+    switch (columnId) {
+      case 'select':
+        return (
+          <label className="cursor-pointer flex items-center justify-center">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => toggleSelection(applicant.applicationId)}
+              disabled={isMarking}
+              className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 cursor-pointer"
+              aria-label={`Select ${applicant.studentName}`}
+            />
+          </label>
+        );
+
+      case 'studentName':
+        return (
+          <span className="font-semibold text-slate-900 block break-words">
+            {applicant.studentName}
+          </span>
+        );
+
+      case 'rollNumber':
+        return (
+          <span
+            className={`font-mono text-slate-700 block truncate ${
+              applicant.rollNumber ? '' : 'text-slate-400 italic'
+            }`}
+          >
+            {applicant.rollNumber || 'N/A'}
+          </span>
+        );
+
+      case 'department':
+        return (
+          <span
+            className="text-slate-700 truncate block"
+            title={applicant.departmentName}
+          >
+            {applicant.departmentName || UNASSIGNED_LABEL}
+          </span>
+        );
+
+      case 'status':
+        return (
+          <span
+            className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold border ${statusBadge}`}
+          >
+            {applicant.status}
+          </span>
+        );
+
+      case 'markedBy':
+        return (
+          <span
+            className="text-slate-600 truncate block"
+            title={applicant.markedByName || '—'}
+          >
+            {applicant.markedByName || '—'}
+          </span>
+        );
+
+      case 'markedAt':
+        return (
+          <span
+            className="text-slate-500 block truncate"
+            title={applicant.markedAt ? formatDateTime(applicant.markedAt) : '—'}
+          >
+            {applicant.markedAt ? formatDateTime(applicant.markedAt) : '—'}
+          </span>
+        );
+
+      case 'actions':
+        return (
+          <div className="flex items-center gap-1">
+            {!isArchived && (
+              <>
+                {applicant.status !== 'Present' && (
+                  <button
+                    onClick={() =>
+                      handleIndividualMark(applicant.applicationId, 'Present')
+                    }
+                    disabled={isMarking}
+                    title="Mark Present"
+                    className="p-1 rounded text-emerald-600 hover:bg-emerald-50 transition cursor-pointer disabled:opacity-30"
+                    aria-label={`Mark ${applicant.studentName} as Present`}
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                  </button>
+                )}
+                {applicant.status !== 'Absent' && (
+                  <button
+                    onClick={() =>
+                      handleIndividualMark(applicant.applicationId, 'Absent')
+                    }
+                    disabled={isMarking}
+                    title="Mark Absent"
+                    className="p-1 rounded text-rose-600 hover:bg-rose-50 transition cursor-pointer disabled:opacity-30"
+                    aria-label={`Mark ${applicant.studentName} as Absent`}
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                )}
+              </>
+            )}
+            <button
+              onClick={() => toggleHistory(applicant.applicationId)}
+              title={isHistoryExpanded ? 'Hide history' : 'Show history'}
+              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              aria-label={`${
+                isHistoryExpanded ? 'Hide' : 'Show'
+              } history for ${applicant.studentName}`}
+            >
+              {isHistoryLoadingItem ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <History className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Navigation Bar */}
@@ -752,44 +956,41 @@ const DriveAttendancePage = () => {
             </div>
           </div>
 
-          {/* Quick links to department management */}
+          {/* Single Entry Point: Department Settings */}
           <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
             <button
-              onClick={() => setShowDeptPanel(showDeptPanel === 'hod' ? null : 'hod')}
-              className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer hover:underline"
+              onClick={() => setIsDeptPanelOpen((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer hover:underline"
+              aria-expanded={isDeptPanelOpen}
+              aria-label="Department Settings"
             >
-              <User className="w-3.5 h-3.5" />
-              HOD Contact Settings
-            </button>
-            <span className="text-slate-300">|</span>
-            <button
-              onClick={() => setShowDeptPanel(showDeptPanel === 'aliases' ? null : 'aliases')}
-              className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer hover:underline"
-            >
-              <Tag className="w-3.5 h-3.5" />
-              Manage Department Names & Aliases
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Department Settings</span>
             </button>
           </div>
         </div>
 
         {/* Department Management Panel (expanded inline) */}
-        {showDeptPanel && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-slate-900">
-                {showDeptPanel === 'hod' ? 'HOD Contact Settings' : 'Department Name Management'}
-              </h2>
+        {isDeptPanelOpen && (
+          <div id="department-settings-panel" className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5">
+            <div className="flex items-center justify-end mb-2">
               <button
                 onClick={() => {
-                  setShowDeptPanel(null);
+                  setIsDeptPanelOpen(false);
                   loadCollegeDepartments();
                 }}
-                className="text-xs text-slate-500 hover:text-slate-900 font-semibold cursor-pointer"
+                className="text-xs text-slate-500 hover:text-slate-900 font-semibold cursor-pointer px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 transition"
               >
-                Close
+                Close Settings
               </button>
             </div>
-            <DepartmentManagementSection />
+            <DepartmentManagementSection
+              onClose={() => {
+                setIsDeptPanelOpen(false);
+                loadCollegeDepartments();
+              }}
+              onDepartmentMutated={loadCollegeDepartments}
+            />
           </div>
         )}
 
@@ -839,10 +1040,10 @@ const DriveAttendancePage = () => {
                 a department. Their profile text did not match any department name, code, or
                 alias.{' '}
                 <button
-                  onClick={() => setShowDeptPanel('aliases')}
+                  onClick={() => setIsDeptPanelOpen(true)}
                   className="text-amber-900 font-semibold underline cursor-pointer hover:text-amber-700"
                 >
-                  Manage department aliases
+                  Open Department Settings
                 </button>{' '}
                 to resolve them.
               </div>
@@ -966,15 +1167,16 @@ const DriveAttendancePage = () => {
             ) : (
               <table className="w-full text-xs" role="table">
                 <thead>
-                  <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
-                    {!isArchived && <th className="px-4 py-2.5 w-10" />}
-                    <th className="px-4 py-2.5">Student Name</th>
-                    <th className="px-3 py-2.5">Roll Number</th>
-                    <th className="px-3 py-2.5">Department</th>
-                    <th className="px-3 py-2.5">Status</th>
-                    <th className="px-3 py-2.5">Marked By</th>
-                    <th className="px-3 py-2.5">Marked At</th>
-                    <th className="px-3 py-2.5 w-24">Actions</th>
+                  <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 font-semibold border-b border-slate-200">
+                    {activeColumns.map((col) => (
+                      <th
+                        key={col.id}
+                        scope="col"
+                        className={col.headerClassName}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -986,131 +1188,29 @@ const DriveAttendancePage = () => {
                       STATUS_BADGE_CLASSES[applicant.status] || STATUS_BADGE_CLASSES.Pending;
 
                     return (
-                      <tr key={applicant.applicationId} className="group">
-                        <td colSpan={isArchived ? 7 : 8} className="p-0">
-                          <div
-                            className={`flex flex-col ${
-                              isSelected ? 'bg-emerald-50/30' : 'hover:bg-slate-50/50'
-                            } transition`}
-                          >
-                            {/* Main row */}
-                            <div className="flex items-center">
-                              {/* Checkbox */}
-                              {!isArchived && (
-                                <div className="px-4 py-3 w-10 shrink-0">
-                                  <label className="cursor-pointer flex items-center justify-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleSelection(applicant.applicationId)}
-                                      disabled={isMarking}
-                                      className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 cursor-pointer"
-                                      aria-label={`Select ${applicant.studentName}`}
-                                    />
-                                  </label>
-                                </div>
-                              )}
+                      <Fragment key={applicant.applicationId}>
+                        <tr
+                          className={`group transition ${
+                            isSelected ? 'bg-emerald-50/40' : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          {activeColumns.map((col) => (
+                            <td key={col.id} className={col.cellClassName}>
+                              {renderApplicantCell(col.id, applicant, {
+                                isSelected,
+                                isHistoryExpanded,
+                                isHistoryLoadingItem,
+                                statusBadge,
+                              })}
+                            </td>
+                          ))}
+                        </tr>
 
-                              {/* Name */}
-                              <div className="px-4 py-3 flex-1 min-w-[140px]">
-                                <span className="font-semibold text-slate-900">
-                                  {applicant.studentName}
-                                </span>
-                              </div>
-
-                              {/* Roll */}
-                              <div className="px-3 py-3 w-28">
-                                <span
-                                  className={`font-mono text-slate-700 ${
-                                    applicant.rollNumber ? '' : 'text-slate-400 italic'
-                                  }`}
-                                >
-                                  {applicant.rollNumber || 'N/A'}
-                                </span>
-                              </div>
-
-                              {/* Department */}
-                              <div className="px-3 py-3 w-36">
-                                <span className="text-slate-700 truncate block">
-                                  {applicant.departmentName}
-                                </span>
-                              </div>
-
-                              {/* Status Badge */}
-                              <div className="px-3 py-3 w-24">
-                                <span
-                                  className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold border ${statusBadge}`}
-                                >
-                                  {applicant.status}
-                                </span>
-                              </div>
-
-                              {/* Marked By */}
-                              <div className="px-3 py-3 w-32">
-                                <span className="text-slate-600 truncate block">
-                                  {applicant.markedByName || '—'}
-                                </span>
-                              </div>
-
-                              {/* Marked At */}
-                              <div className="px-3 py-3 w-36">
-                                <span className="text-slate-500">
-                                  {applicant.markedAt ? formatDateTime(applicant.markedAt) : '—'}
-                                </span>
-                              </div>
-
-                              {/* Actions */}
-                              <div className="px-3 py-3 w-24 flex items-center gap-1">
-                                {!isArchived && (
-                                  <>
-                                    {applicant.status !== 'Present' && (
-                                      <button
-                                        onClick={() =>
-                                          handleIndividualMark(applicant.applicationId, 'Present')
-                                        }
-                                        disabled={isMarking}
-                                        title="Mark Present"
-                                        className="p-1 rounded text-emerald-600 hover:bg-emerald-50 transition cursor-pointer disabled:opacity-30"
-                                        aria-label={`Mark ${applicant.studentName} as Present`}
-                                      >
-                                        <CheckCircle className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                    {applicant.status !== 'Absent' && (
-                                      <button
-                                        onClick={() =>
-                                          handleIndividualMark(applicant.applicationId, 'Absent')
-                                        }
-                                        disabled={isMarking}
-                                        title="Mark Absent"
-                                        className="p-1 rounded text-rose-600 hover:bg-rose-50 transition cursor-pointer disabled:opacity-30"
-                                        aria-label={`Mark ${applicant.studentName} as Absent`}
-                                      >
-                                        <XCircle className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                  </>
-                                )}
-                                <button
-                                  onClick={() => toggleHistory(applicant.applicationId)}
-                                  title={isHistoryExpanded ? 'Hide history' : 'Show history'}
-                                  className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
-                                  aria-label={`${
-                                    isHistoryExpanded ? 'Hide' : 'Show'
-                                  } history for ${applicant.studentName}`}
-                                >
-                                  {isHistoryLoadingItem ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <History className="w-4 h-4" />
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Expanded History */}
-                            {isHistoryExpanded && (
-                              <div className="px-4 pb-3 ml-10">
+                        {/* Expandable Attendance History (Secondary <tr>) */}
+                        {isHistoryExpanded && (
+                          <tr className={isSelected ? 'bg-emerald-50/20' : 'bg-slate-50/40'}>
+                            <td colSpan={activeColumns.length} className="px-4 pb-3 pt-1">
+                              <div className={!isArchived ? 'ml-10' : ''}>
                                 <div className="bg-slate-50 rounded-lg border border-slate-200 p-3">
                                   <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
@@ -1153,10 +1253,10 @@ const DriveAttendancePage = () => {
                                   )}
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -1198,7 +1298,7 @@ const DriveAttendancePage = () => {
         driveInfo={driveInfo || {}}
         driveDate={driveDate}
         officerName={user?.name || 'Placement Officer'}
-        onOpenHodSettings={() => setShowDeptPanel('hod')}
+        onOpenHodSettings={() => setIsDeptPanelOpen(true)}
         onNotify={showToast}
       />
 

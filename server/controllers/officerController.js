@@ -570,6 +570,501 @@ const createDrive = async (req, res, next) => {
   }
 };
 
+// @desc    Update an existing placement drive
+// @route   PUT /api/officer/drives/:id
+// @access  Private (Placement Officer)
+const updateDrive = async (req, res, next) => {
+  try {
+    const contextCheck = validateOfficerCollegeContext(req.user);
+    if (!contextCheck.valid) {
+      return res.status(contextCheck.status).json({
+        success: false,
+        message: contextCheck.message,
+      });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid drive ID format.',
+      });
+    }
+
+    const drive = await PlacementDrive.findById(id);
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: 'Placement drive not found.',
+      });
+    }
+
+    // Strict multi-tenant verification
+    if (!drive.collegeId || drive.collegeId.toString() !== req.user.collegeId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: Cannot update a placement drive that belongs to another institution.',
+      });
+    }
+
+    // Archived drives cannot be edited
+    if (drive.isArchived) {
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVE_ARCHIVED',
+        message: 'Archived drives cannot be edited. Please restore the drive before making updates.',
+      });
+    }
+
+    // Reject attempts to modify protected / immutable fields
+    const PROTECTED_FIELDS = ['_id', 'collegeId', 'isArchived', 'archivedAt', 'archivedBy', 'createdAt', 'updatedAt'];
+    for (const field of PROTECTED_FIELDS) {
+      if (req.body[field] !== undefined) {
+        return res.status(400).json({
+          success: false,
+          message: `Modification of protected field '${field}' is strictly forbidden.`,
+        });
+      }
+    }
+
+    // Explicit allowlist of editable fields to prevent mass assignment
+    const ALLOWED_FIELDS = new Set([
+      'jobRole',
+      'jobDescription',
+      'packageDetails',
+      'companyLocation',
+      'company',
+      'companyId',
+      'companyName',
+      'industry',
+      'website',
+      'companyDescription',
+      'logoUrl',
+      'driveDate',
+      'registrationDeadline',
+      'isActive',
+      'eligibilityCriteria',
+      'confirmEligibilityImpact',
+    ]);
+
+    for (const key of Object.keys(req.body)) {
+      if (!ALLOWED_FIELDS.has(key)) {
+        return res.status(400).json({
+          success: false,
+          message: `Field '${key}' is not permitted for update.`,
+        });
+      }
+    }
+
+    const {
+      jobRole,
+      jobDescription,
+      packageDetails,
+      companyLocation,
+      company,
+      companyId,
+      companyName,
+      industry,
+      website,
+      companyDescription,
+      logoUrl,
+      driveDate,
+      registrationDeadline,
+      isActive,
+      eligibilityCriteria,
+      confirmEligibilityImpact,
+    } = req.body;
+
+    // 1. Validate Job Details
+    if (jobRole !== undefined) {
+      if (typeof jobRole !== 'string' || !jobRole.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'jobRole is required and must be a non-empty string.',
+        });
+      }
+    }
+
+    if (jobDescription !== undefined) {
+      if (typeof jobDescription !== 'string' || !jobDescription.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'jobDescription is required and must be a non-empty string.',
+        });
+      }
+      if (jobDescription.trim().length < 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'jobDescription must be at least 10 characters long.',
+        });
+      }
+      if (jobDescription.trim().length > 5000) {
+        return res.status(400).json({
+          success: false,
+          message: 'jobDescription must not exceed 5000 characters.',
+        });
+      }
+    }
+
+    if (packageDetails !== undefined) {
+      if (packageDetails !== null && typeof packageDetails !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'packageDetails must be a string or null.',
+        });
+      }
+    }
+
+    let sanitizedLocation;
+    if (companyLocation !== undefined) {
+      const locationValidation = validateCompanyLocation(companyLocation, true);
+      if (!locationValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: locationValidation.message,
+        });
+      }
+      sanitizedLocation = locationValidation.sanitized;
+    }
+
+    // 2. Validate Dates (supports partial updates by combining submitted values with existing stored values)
+    let parsedDriveDate = drive.driveDate;
+    if (driveDate !== undefined) {
+      parsedDriveDate = new Date(driveDate);
+      if (isNaN(parsedDriveDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid driveDate format.',
+        });
+      }
+    }
+
+    let parsedDeadline = drive.registrationDeadline;
+    if (registrationDeadline !== undefined) {
+      parsedDeadline = new Date(registrationDeadline);
+      if (isNaN(parsedDeadline.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid registrationDeadline format.',
+        });
+      }
+    }
+
+    if (parsedDeadline > parsedDriveDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration deadline cannot be after the drive date.',
+      });
+    }
+
+    // 3. Validate Eligibility Criteria
+    let cleanedEligibility;
+    let isEligibilityChanged = false;
+
+    if (eligibilityCriteria !== undefined) {
+      if (typeof eligibilityCriteria !== 'object' || eligibilityCriteria === null || Array.isArray(eligibilityCriteria)) {
+        return res.status(400).json({
+          success: false,
+          message: 'eligibilityCriteria must be an object.',
+        });
+      }
+
+      const existingElig = drive.eligibilityCriteria || {};
+      cleanedEligibility = {
+        minTenthPercentage: existingElig.minTenthPercentage ?? 0,
+        minTwelfthPercentage: existingElig.minTwelfthPercentage ?? 0,
+        ugCriteriaType: existingElig.ugCriteriaType,
+        minCgpa: existingElig.minCgpa ?? 0,
+        minUgPercentage: existingElig.minUgPercentage ?? 0,
+        maxBacklogs: existingElig.maxBacklogs ?? 0,
+        requiredCourses: Array.isArray(existingElig.requiredCourses) ? [...existingElig.requiredCourses] : [],
+        requiredSkills: Array.isArray(existingElig.requiredSkills) ? [...existingElig.requiredSkills] : [],
+      };
+
+      if (eligibilityCriteria.minTenthPercentage !== undefined) {
+        if (eligibilityCriteria.minTenthPercentage === null || eligibilityCriteria.minTenthPercentage === '') {
+          cleanedEligibility.minTenthPercentage = 0;
+        } else {
+          const minTenthNum = Number(eligibilityCriteria.minTenthPercentage);
+          if (isNaN(minTenthNum) || minTenthNum < 0 || minTenthNum > 100) {
+            return res.status(400).json({
+              success: false,
+              message: 'minTenthPercentage must be a number between 0 and 100.',
+            });
+          }
+          cleanedEligibility.minTenthPercentage = minTenthNum;
+        }
+      }
+
+      if (eligibilityCriteria.minTwelfthPercentage !== undefined) {
+        if (eligibilityCriteria.minTwelfthPercentage === null || eligibilityCriteria.minTwelfthPercentage === '') {
+          cleanedEligibility.minTwelfthPercentage = 0;
+        } else {
+          const minTwelfthNum = Number(eligibilityCriteria.minTwelfthPercentage);
+          if (isNaN(minTwelfthNum) || minTwelfthNum < 0 || minTwelfthNum > 100) {
+            return res.status(400).json({
+              success: false,
+              message: 'minTwelfthPercentage must be a number between 0 and 100.',
+            });
+          }
+          cleanedEligibility.minTwelfthPercentage = minTwelfthNum;
+        }
+      }
+
+      let ugBasis = eligibilityCriteria.ugCriteriaType !== undefined 
+        ? eligibilityCriteria.ugCriteriaType 
+        : cleanedEligibility.ugCriteriaType;
+
+      if (ugBasis !== undefined && ugBasis !== null) {
+        if (typeof ugBasis !== 'string' || !['CGPA', 'PERCENTAGE', 'NONE'].includes(ugBasis.trim().toUpperCase())) {
+          return res.status(400).json({
+            success: false,
+            message: 'ugCriteriaType must be one of: CGPA, PERCENTAGE, NONE.',
+          });
+        }
+        ugBasis = ugBasis.trim().toUpperCase();
+      }
+
+      const candidateMinCgpa = eligibilityCriteria.minCgpa !== undefined 
+        ? eligibilityCriteria.minCgpa 
+        : cleanedEligibility.minCgpa;
+      const candidateMinUg = eligibilityCriteria.minUgPercentage !== undefined 
+        ? eligibilityCriteria.minUgPercentage 
+        : cleanedEligibility.minUgPercentage;
+
+      if (ugBasis === 'NONE') {
+        if (
+          (candidateMinCgpa !== undefined && Number(candidateMinCgpa) > 0) ||
+          (candidateMinUg !== undefined && Number(candidateMinUg) > 0)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: 'Contradictory criteria: Cannot specify minimum CGPA or UG percentage when UG criteria type is NONE.',
+          });
+        }
+        cleanedEligibility.ugCriteriaType = 'NONE';
+        cleanedEligibility.minCgpa = 0;
+        cleanedEligibility.minUgPercentage = 0;
+      } else if (ugBasis === 'CGPA') {
+        if (candidateMinUg !== undefined && Number(candidateMinUg) > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Contradictory criteria: Cannot specify minimum UG percentage when UG criteria type is CGPA.',
+          });
+        }
+        if (candidateMinCgpa === undefined || candidateMinCgpa === null || candidateMinCgpa === '') {
+          return res.status(400).json({
+            success: false,
+            message: 'Minimum CGPA threshold is required when UG criteria type is CGPA.',
+          });
+        }
+        const minCgpaNum = Number(candidateMinCgpa);
+        if (isNaN(minCgpaNum) || minCgpaNum <= 0 || minCgpaNum > 10) {
+          return res.status(400).json({
+            success: false,
+            message: 'minCgpa must be a positive number between 0 and 10.',
+          });
+        }
+        cleanedEligibility.ugCriteriaType = 'CGPA';
+        cleanedEligibility.minCgpa = minCgpaNum;
+        cleanedEligibility.minUgPercentage = 0;
+      } else if (ugBasis === 'PERCENTAGE') {
+        if (candidateMinCgpa !== undefined && Number(candidateMinCgpa) > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Contradictory criteria: Cannot specify minimum CGPA when UG criteria type is PERCENTAGE.',
+          });
+        }
+        if (candidateMinUg === undefined || candidateMinUg === null || candidateMinUg === '') {
+          return res.status(400).json({
+            success: false,
+            message: 'Minimum UG percentage threshold is required when UG criteria type is PERCENTAGE.',
+          });
+        }
+        const minUgNum = Number(candidateMinUg);
+        if (isNaN(minUgNum) || minUgNum <= 0 || minUgNum > 100) {
+          return res.status(400).json({
+            success: false,
+            message: 'minUgPercentage must be a positive number between 0 and 100.',
+          });
+        }
+        cleanedEligibility.ugCriteriaType = 'PERCENTAGE';
+        cleanedEligibility.minUgPercentage = minUgNum;
+        cleanedEligibility.minCgpa = 0;
+      }
+
+      if (eligibilityCriteria.maxBacklogs !== undefined) {
+        const maxBacklogsNum = Number(eligibilityCriteria.maxBacklogs);
+        if (isNaN(maxBacklogsNum) || maxBacklogsNum < 0 || !Number.isInteger(maxBacklogsNum)) {
+          return res.status(400).json({
+            success: false,
+            message: 'maxBacklogs must be a non-negative integer.',
+          });
+        }
+        cleanedEligibility.maxBacklogs = maxBacklogsNum;
+      }
+
+      if (eligibilityCriteria.requiredCourses !== undefined) {
+        if (!Array.isArray(eligibilityCriteria.requiredCourses)) {
+          return res.status(400).json({
+            success: false,
+            message: 'requiredCourses must be an array of strings.',
+          });
+        }
+        cleanedEligibility.requiredCourses = eligibilityCriteria.requiredCourses
+          .map((c) => String(c).trim())
+          .filter(Boolean);
+      }
+
+      if (eligibilityCriteria.requiredSkills !== undefined) {
+        if (!Array.isArray(eligibilityCriteria.requiredSkills)) {
+          return res.status(400).json({
+            success: false,
+            message: 'requiredSkills must be an array of strings.',
+          });
+        }
+        cleanedEligibility.requiredSkills = eligibilityCriteria.requiredSkills
+          .map((s) => String(s).trim())
+          .filter(Boolean);
+      }
+
+      // Check whether actual values changed
+      const oldElig = drive.eligibilityCriteria || {};
+      const tenthChanged = (oldElig.minTenthPercentage ?? 0) !== cleanedEligibility.minTenthPercentage;
+      const twelfthChanged = (oldElig.minTwelfthPercentage ?? 0) !== cleanedEligibility.minTwelfthPercentage;
+      const ugTypeChanged = (oldElig.ugCriteriaType || null) !== (cleanedEligibility.ugCriteriaType || null);
+      const cgpaChanged = (oldElig.minCgpa ?? 0) !== cleanedEligibility.minCgpa;
+      const ugPctChanged = (oldElig.minUgPercentage ?? 0) !== cleanedEligibility.minUgPercentage;
+      const backlogsChanged = (oldElig.maxBacklogs ?? 0) !== cleanedEligibility.maxBacklogs;
+
+      const oldCoursesSorted = [...(oldElig.requiredCourses || [])].map((c) => String(c).trim()).filter(Boolean).sort();
+      const newCoursesSorted = [...(cleanedEligibility.requiredCourses || [])].sort();
+      const coursesChanged = JSON.stringify(oldCoursesSorted) !== JSON.stringify(newCoursesSorted);
+
+      const oldSkillsSorted = [...(oldElig.requiredSkills || [])].map((s) => String(s).trim()).filter(Boolean).sort();
+      const newSkillsSorted = [...(cleanedEligibility.requiredSkills || [])].sort();
+      const skillsChanged = JSON.stringify(oldSkillsSorted) !== JSON.stringify(newSkillsSorted);
+
+      isEligibilityChanged = tenthChanged || twelfthChanged || ugTypeChanged || cgpaChanged || ugPctChanged || backlogsChanged || coursesChanged || skillsChanged;
+    }
+
+    // 4. Existing Applicant Protection & Eligibility Confirmation Guard
+    if (isEligibilityChanged) {
+      const applicantCount = await DriveApplication.countDocuments({ placementDrive: drive._id });
+      if (applicantCount > 0) {
+        if (confirmEligibilityImpact !== true) {
+          return res.status(409).json({
+            success: false,
+            code: 'ELIGIBILITY_CHANGE_CONFIRMATION_REQUIRED',
+            message: `This placement drive currently has ${applicantCount} applicant(s). Modifying eligibility criteria can alter the dynamically evaluated eligibility status displayed to existing applicants. To proceed, please confirm this change by submitting 'confirmEligibilityImpact: true'.`,
+            applicantCount,
+          });
+        }
+      }
+    }
+
+    // 5. Company Reference Handling
+    let resolvedCompanyId = undefined;
+    const targetCompanyId =
+      companyId ||
+      (typeof company === 'string' && mongoose.Types.ObjectId.isValid(company) ? company : null) ||
+      (company && company._id ? company._id : null);
+
+    if (targetCompanyId) {
+      if (!mongoose.Types.ObjectId.isValid(targetCompanyId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid company ID format.',
+        });
+      }
+      const existingCompany = await Company.findById(targetCompanyId);
+      if (!existingCompany) {
+        return res.status(404).json({
+          success: false,
+          message: 'Referenced company not found.',
+        });
+      }
+      resolvedCompanyId = existingCompany._id;
+    } else if (companyName !== undefined || (company && typeof company === 'object' && company.name)) {
+      const rawName = companyName || company.name;
+      if (typeof rawName !== 'string' || !rawName.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'companyName must be a non-empty string.',
+        });
+      }
+
+      const trimmedName = rawName.trim();
+      const escapedNameRegex = new RegExp(`^${trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+      let foundCompany = await Company.findOne({
+        name: { $regex: escapedNameRegex },
+      });
+
+      if (!foundCompany) {
+        try {
+          foundCompany = await Company.create({
+            name: trimmedName,
+            industry: industry || (company && company.industry ? company.industry : undefined),
+            website: website || (company && company.website ? company.website : undefined),
+            description: companyDescription || (company && company.description ? company.description : undefined),
+            logoUrl: logoUrl || (company && company.logoUrl ? company.logoUrl : undefined),
+          });
+        } catch (createErr) {
+          if (createErr.code === 11000) {
+            foundCompany = await Company.findOne({
+              name: { $regex: escapedNameRegex },
+            });
+            if (!foundCompany) {
+              throw createErr;
+            }
+          } else {
+            throw createErr;
+          }
+        }
+      }
+
+      resolvedCompanyId = foundCompany._id;
+    }
+
+    // 6. Apply updates safely to drive
+    if (jobRole !== undefined) drive.jobRole = jobRole.trim();
+    if (jobDescription !== undefined) drive.jobDescription = jobDescription.trim();
+    if (packageDetails !== undefined) {
+      drive.packageDetails = packageDetails ? packageDetails.trim() : undefined;
+    }
+    if (sanitizedLocation !== undefined) drive.companyLocation = sanitizedLocation;
+    if (driveDate !== undefined) drive.driveDate = parsedDriveDate;
+    if (registrationDeadline !== undefined) drive.registrationDeadline = parsedDeadline;
+    if (isActive !== undefined) drive.isActive = Boolean(isActive);
+    if (cleanedEligibility !== undefined) drive.eligibilityCriteria = cleanedEligibility;
+    if (resolvedCompanyId !== undefined) drive.company = resolvedCompanyId;
+
+    await drive.save();
+
+    const populatedDrive = await PlacementDrive.findById(drive._id).populate('company');
+    const driveObj = populatedDrive.toObject();
+    const effectiveUgCriteriaType = resolveUgBasis(populatedDrive.eligibilityCriteria);
+    const status = getDriveLifecycleStatus(populatedDrive, new Date());
+
+    res.status(200).json({
+      success: true,
+      message: 'Placement drive updated successfully.',
+      drive: {
+        ...driveObj,
+        status,
+        effectiveUgCriteriaType,
+        eligibilityCriteria: {
+          ...driveObj.eligibilityCriteria,
+          effectiveUgCriteriaType,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    List placement drives for the authenticated officer's college
 // @route   GET /api/officer/drives
 // @access  Private (Placement Officer)
@@ -682,7 +1177,7 @@ const getDriveApplicants = async (req, res, next) => {
       .filter(Boolean);
 
     const profiles = await StudentProfile.find({ user: { $in: studentUserIds } })
-      .select('user rollNumber department course batch cgpa backlogs skills resumeUrl');
+      .select('user rollNumber department course batch section academicYear cgpa backlogs skills resumeUrl');
 
     const profileMap = new Map();
     profiles.forEach((p) => {
@@ -706,6 +1201,8 @@ const getDriveApplicants = async (req, res, next) => {
             department: profile.department || null,
             course: profile.course || null,
             batch: profile.batch || null,
+            section: profile.section || null,
+            academicYear: profile.academicYear || null,
             cgpa: profile.cgpa !== undefined ? profile.cgpa : null,
             backlogs: profile.backlogs !== undefined ? profile.backlogs : null,
             skills: profile.skills || [],
@@ -1052,6 +1549,7 @@ module.exports = {
   createDrive,
   getOfficerDrives,
   getDriveApplicants,
+  updateDrive,
   updateApplicationStatus,
   archiveDrive,
   restoreDrive,

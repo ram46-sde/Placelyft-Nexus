@@ -125,6 +125,8 @@ const upsertProfile = async (req, res, next) => {
       department,
       course,
       batch,
+      section,
+      academicYear,
       cgpa,
       backlogs,
       tenthPercentage,
@@ -144,6 +146,38 @@ const upsertProfile = async (req, res, next) => {
     const parsedUg = parseAcademicNumber(ugPercentage, 'Undergraduate percentage', 0, 100);
     const parsedCgpa = parseAcademicNumber(cgpa, 'CGPA', 0, 10);
     const parsedBacklogs = parseAcademicNumber(backlogs, 'Backlogs', 0, 100, false);
+
+    // Validate section: optional string, trimmed; empty/whitespace-only treated as null
+    let normalizedSection;
+    if (section !== undefined) {
+      if (section === null) {
+        normalizedSection = null;
+      } else if (typeof section === 'string') {
+        const trimmed = section.trim();
+        normalizedSection = trimmed.length > 0 ? trimmed : null;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Section must be a string value.',
+        });
+      }
+    }
+
+    // Validate academicYear: optional, must be one of I, II, III, IV; null clears it
+    const VALID_ACADEMIC_YEARS = ['I', 'II', 'III', 'IV'];
+    let normalizedAcademicYear;
+    if (academicYear !== undefined) {
+      if (academicYear === null || (typeof academicYear === 'string' && academicYear.trim() === '')) {
+        normalizedAcademicYear = null;
+      } else if (typeof academicYear === 'string' && VALID_ACADEMIC_YEARS.includes(academicYear.trim())) {
+        normalizedAcademicYear = academicYear.trim();
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Academic year must be one of: I, II, III, IV.',
+        });
+      }
+    }
 
     // Validate projects if provided
     if (projects !== undefined) {
@@ -248,6 +282,8 @@ const upsertProfile = async (req, res, next) => {
       ...(department !== undefined && { department }),
       ...(course !== undefined && { course }),
       ...(batch !== undefined && { batch }),
+      ...(section !== undefined && { section: normalizedSection }),
+      ...(academicYear !== undefined && { academicYear: normalizedAcademicYear }),
       ...(parsedCgpa.shouldSet && { cgpa: parsedCgpa.value }),
       ...(parsedBacklogs.shouldSet && { backlogs: parsedBacklogs.value ?? 0 }),
       ...(parsedTenth.shouldSet && { tenthPercentage: parsedTenth.value }),

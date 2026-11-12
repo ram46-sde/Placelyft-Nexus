@@ -56,6 +56,24 @@ const departmentSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    // Coordination fields for safe permanent department deletion (Stage 1)
+    deletionState: {
+      type: String,
+      enum: ['open', 'closing'],
+      default: 'open',
+    },
+    activeWriterIds: {
+      type: [String],
+      default: [],
+    },
+    deletionToken: {
+      type: String,
+      default: null,
+    },
+    deletionStartedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

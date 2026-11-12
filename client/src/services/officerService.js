@@ -13,6 +13,12 @@ export const officerService = {
     return response.data;
   },
 
+  // Update an existing placement drive
+  updateDrive: async (driveId, payload) => {
+    const response = await api.put(`/officer/drives/${driveId}`, payload);
+    return response.data;
+  },
+
   // Fetch applicant roster and academic profiles for a specific drive
   getDriveApplicants: async (driveId) => {
     const response = await api.get(`/officer/drives/${driveId}/applications`);
@@ -46,6 +52,21 @@ export const officerService = {
   // Department Management
   getDepartments: async () => {
     const response = await api.get('/officer/departments');
+    return response.data;
+  },
+
+  createDepartment: async (payload) => {
+    const response = await api.post('/officer/departments', payload);
+    return response.data;
+  },
+
+  updateDepartment: async (deptId, payload) => {
+    const response = await api.put(`/officer/departments/${deptId}`, payload);
+    return response.data;
+  },
+
+  deleteDepartment: async (deptId) => {
+    const response = await api.delete(`/officer/departments/${deptId}`);
     return response.data;
   },
 

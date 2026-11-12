@@ -4,6 +4,7 @@ const {
   createDrive,
   getOfficerDrives,
   getDriveApplicants,
+  updateDrive,
   updateApplicationStatus,
   archiveDrive,
   restoreDrive,
@@ -12,6 +13,9 @@ const {
 } = require('../controllers/officerController');
 const {
   getOfficerDepartments,
+  createDepartment,
+  updateDepartment,
+  deleteDepartment,
   updateDepartmentHodContact,
   updateDepartmentAliases,
 } = require('../controllers/departmentController');
@@ -34,6 +38,9 @@ router.use(authorize('placement_officer'));
 
 // Department Management
 router.get('/departments', getOfficerDepartments);
+router.post('/departments', createDepartment);
+router.put('/departments/:id', updateDepartment);
+router.delete('/departments/:id', deleteDepartment);
 router.put('/departments/:id/hod-contact', updateDepartmentHodContact);
 router.put('/departments/:id/aliases', updateDepartmentAliases);
 
@@ -41,6 +48,7 @@ router.put('/departments/:id/aliases', updateDepartmentAliases);
 router.post('/drives', createDrive);
 router.get('/drives', getOfficerDrives);
 router.get('/drives/:id/applications', getDriveApplicants);
+router.put('/drives/:id', updateDrive);
 router.patch('/drives/:id/archive', archiveDrive);
 router.patch('/drives/:id/restore', restoreDrive);
 router.delete('/drives/:id', deleteDrive);

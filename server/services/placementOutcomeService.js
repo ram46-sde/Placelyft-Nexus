@@ -5,6 +5,7 @@ const StudentProfile = require('../models/StudentProfile');
 const PlacementDrive = require('../models/PlacementDrive');
 const Notification = require('../models/Notification');
 const { resolveDepartment, fetchCollegeDepartments } = require('../utils/departmentResolver');
+const departmentCoordination = require('../utils/departmentCoordination');
 
 /**
  * Validates candidate CTC input according to Phase 4A specification:
@@ -314,291 +315,49 @@ async function mutateOutcomeService({
         collegeId,
       });
 
-      const serverTime = new Date();
+      // 4a. If already verified: idempotent no-op or mismatch conflict
+      // Does not write or replace departmentSnapshot -> DO NOT acquire writer token
+      if (existing && existing.status === 'verified') {
+        const currentCtc = existing.offerPackage ? existing.offerPackage.ctc : null;
 
-      if (!existing) {
-        // Case A: No existing record -> First verification via upsert with $setOnInsert
-        const eventId = new mongoose.Types.ObjectId();
-        const firstHistoryEntry = {
-          eventId,
-          action: 'verified',
-          oldStatus: null,
-          newStatus: 'verified',
-          changedBy: officerUser._id,
-          changedAt: serverTime,
-          reason: null,
-          ctc: parsedCtc,
-        };
+        // Same CTC or CTC omitted: idempotent no-op (no change, no history)
+        if (parsedCtc === null || parsedCtc === currentCtc) {
+          // Self-heal: ensure flag is set if missing on legacy outcome
+          await DriveApplication.updateOne(
+            { _id: applicationId, collegeId },
+            { $set: { outcomeVerified: true } }
+          );
 
-        const createdRecord = await PlacementOutcome.findOneAndUpdate(
-          { application: applicationId },
-          {
-            $setOnInsert: {
-              collegeId,
-              placementDrive: application.placementDrive,
-              application: applicationId,
-              student: application.student,
-              status: 'verified',
-              verifiedBy: officerUser._id,
-              verifiedAt: serverTime,
-              departmentSnapshot,
-              offerPackage: {
-                ctc: parsedCtc,
-                unit: 'LPA',
-                currency: 'INR',
-              },
-              history: [firstHistoryEntry],
-            },
-          },
-          { upsert: true, new: false } // returns null if inserted
-        );
-
-        if (!createdRecord) {
-          // Successfully created first verification
-          const inserted = await PlacementOutcome.findOne({ application: applicationId }).populate(
+          const populated = await PlacementOutcome.findById(existing._id).populate(
             'verifiedBy',
             'name'
           );
-
-          // Post-commit guarded block: dispatch OUTCOME_VERIFIED notification
-          let notificationCreated = false;
-          try {
-            const notifRes = await dispatchOutcomeVerifiedNotification({
-              outcomeId: inserted._id,
-              eventId,
-              studentId: inserted.student,
-              collegeId: inserted.collegeId,
-              placementDriveId: inserted.placementDrive,
-              applicationId,
-              verifiedAt: serverTime,
-            });
-            notificationCreated = !!notifRes.notificationCreated;
-          } catch (postCommitErr) {
-            console.error('[Notification Dispatch Failure]:', {
-              outcomeId: inserted._id ? inserted._id.toString() : null,
-              collegeId: collegeId ? collegeId.toString() : null,
-              type: 'OUTCOME_VERIFIED',
-              errorName: postCommitErr.name || 'Error',
-              errorCode: postCommitErr.code || null,
-              errorMessage: (postCommitErr.message || '').substring(0, 200),
-            });
-          }
-
           return {
             status: 200,
-            data: formatOutcomeResponse(inserted, 'created', notificationCreated),
+            data: formatOutcomeResponse(populated, 'already_verified', false),
           };
-        } else {
-          // Existed concurrently; reload and fall through to existing logic
-          existing = createdRecord;
         }
+
+        // Different CTC supplied: 409 OUTCOME_PACKAGE_MISMATCH (outcome stays verified, flag stays set)
+        return {
+          status: 409,
+          error: {
+            code: 'OUTCOME_PACKAGE_MISMATCH',
+            message:
+              'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
+          },
+        };
       }
 
-      // Case B: Existing record exists
-      if (existing) {
-        if (existing.status === 'verified') {
-          const currentCtc = existing.offerPackage ? existing.offerPackage.ctc : null;
+      // 4b. Acquire writer token before writing department snapshot
+      let outcomeWriterToken = null;
+      if (departmentSnapshot.departmentId) {
+        const tokenRes = await departmentCoordination.acquireWriterToken({
+          departmentId: departmentSnapshot.departmentId,
+          collegeId,
+        });
 
-          // Same CTC or CTC omitted: idempotent no-op (no change, no history)
-          if (parsedCtc === null || parsedCtc === currentCtc) {
-            // Self-heal: ensure flag is set if missing on legacy outcome
-            await DriveApplication.updateOne(
-              { _id: applicationId, collegeId },
-              { $set: { outcomeVerified: true } }
-            );
-
-            const populated = await PlacementOutcome.findById(existing._id).populate(
-              'verifiedBy',
-              'name'
-            );
-            return {
-              status: 200,
-              data: formatOutcomeResponse(populated, 'already_verified', false),
-            };
-          }
-
-          // Different CTC supplied: 409 OUTCOME_PACKAGE_MISMATCH (outcome stays verified, flag stays set)
-          return {
-            status: 409,
-            error: {
-              code: 'OUTCOME_PACKAGE_MISMATCH',
-              message:
-                'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
-            },
-          };
-        }
-
-        if (existing.status === 'revoked') {
-          // Re-verification of revoked outcome using Compare-and-Set
-          const eventId = new mongoose.Types.ObjectId();
-          const reverifyHistoryEntry = {
-            eventId,
-            action: 'reverified',
-            oldStatus: 'revoked',
-            newStatus: 'verified',
-            changedBy: officerUser._id,
-            changedAt: serverTime,
-            reason: null,
-            ctc: parsedCtc,
-          };
-
-          const updated = await PlacementOutcome.findOneAndUpdate(
-            {
-              _id: existing._id,
-              application: applicationId,
-              collegeId,
-              status: 'revoked', // CAS condition
-            },
-            {
-              $set: {
-                status: 'verified',
-                departmentSnapshot, // fresh snapshot on reverification
-                verifiedBy: officerUser._id,
-                verifiedAt: serverTime,
-                offerPackage: {
-                  ctc: parsedCtc,
-                  unit: 'LPA',
-                  currency: 'INR',
-                },
-              },
-              $push: {
-                history: reverifyHistoryEntry,
-              },
-            },
-            { new: true }
-          ).populate('verifiedBy', 'name');
-
-          if (updated) {
-            let notificationCreated = false;
-            try {
-              const notifRes = await dispatchOutcomeVerifiedNotification({
-                outcomeId: updated._id,
-                eventId,
-                studentId: updated.student,
-                collegeId: updated.collegeId,
-                placementDriveId: updated.placementDrive,
-                applicationId,
-                verifiedAt: serverTime,
-              });
-              notificationCreated = !!notifRes.notificationCreated;
-            } catch (postCommitErr) {
-              console.error('[Notification Dispatch Failure]:', {
-                outcomeId: updated._id ? updated._id.toString() : null,
-                collegeId: collegeId ? collegeId.toString() : null,
-                type: 'OUTCOME_VERIFIED',
-                errorName: postCommitErr.name || 'Error',
-                errorCode: postCommitErr.code || null,
-                errorMessage: (postCommitErr.message || '').substring(0, 200),
-              });
-            }
-
-            return {
-              status: 200,
-              data: formatOutcomeResponse(updated, 'reverified', notificationCreated),
-            };
-          }
-
-          // CAS condition failed due to concurrent modification; re-read and retry once
-          const reRead = await PlacementOutcome.findOne({
-            application: applicationId,
-            collegeId,
-          });
-
-          if (!reRead) {
-            return {
-              status: 404,
-              error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
-            };
-          }
-
-          if (reRead.status === 'verified') {
-            const currentCtc = reRead.offerPackage ? reRead.offerPackage.ctc : null;
-            if (parsedCtc === null || parsedCtc === currentCtc) {
-              await DriveApplication.updateOne(
-                { _id: applicationId, collegeId },
-                { $set: { outcomeVerified: true } }
-              );
-              const populated = await PlacementOutcome.findById(reRead._id).populate(
-                'verifiedBy',
-                'name'
-              );
-              return {
-                status: 200,
-                data: formatOutcomeResponse(populated, 'already_verified', false),
-              };
-            } else {
-              return {
-                status: 409,
-                error: {
-                  code: 'OUTCOME_PACKAGE_MISMATCH',
-                  message:
-                    'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
-                },
-              };
-            }
-          }
-
-          // Re-attempt CAS once against revoked status
-          const retryTime = new Date();
-          reverifyHistoryEntry.changedAt = retryTime;
-
-          const retryUpdated = await PlacementOutcome.findOneAndUpdate(
-            {
-              _id: reRead._id,
-              application: applicationId,
-              collegeId,
-              status: 'revoked',
-            },
-            {
-              $set: {
-                status: 'verified',
-                departmentSnapshot,
-                verifiedBy: officerUser._id,
-                verifiedAt: retryTime,
-                offerPackage: {
-                  ctc: parsedCtc,
-                  unit: 'LPA',
-                  currency: 'INR',
-                },
-              },
-              $push: {
-                history: reverifyHistoryEntry,
-              },
-            },
-            { new: true }
-          ).populate('verifiedBy', 'name');
-
-          if (retryUpdated) {
-            let notificationCreated = false;
-            try {
-              const notifRes = await dispatchOutcomeVerifiedNotification({
-                outcomeId: retryUpdated._id,
-                eventId,
-                studentId: retryUpdated.student,
-                collegeId: retryUpdated.collegeId,
-                placementDriveId: retryUpdated.placementDrive,
-                applicationId,
-                verifiedAt: retryTime,
-              });
-              notificationCreated = !!notifRes.notificationCreated;
-            } catch (postCommitErr) {
-              console.error('[Notification Dispatch Failure]:', {
-                outcomeId: retryUpdated._id ? retryUpdated._id.toString() : null,
-                collegeId: collegeId ? collegeId.toString() : null,
-                type: 'OUTCOME_VERIFIED',
-                errorName: postCommitErr.name || 'Error',
-                errorCode: postCommitErr.code || null,
-                errorMessage: (postCommitErr.message || '').substring(0, 200),
-              });
-            }
-
-            return {
-              status: 200,
-              data: formatOutcomeResponse(retryUpdated, 'reverified', notificationCreated),
-            };
-          }
-
-          // If retry CAS fails, compensate if this request claimed the lock
+        if (!tokenRes.success) {
           if (claimedLock) {
             try {
               await DriveApplication.updateOne(
@@ -613,11 +372,307 @@ async function mutateOutcomeService({
           return {
             status: 409,
             error: {
-              code: 'CONCURRENT_MODIFICATION',
-              message: 'Concurrent update conflict during reverification. Please try again.',
+              code: tokenRes.code || 'DEPARTMENT_DELETION_CONFLICT',
+              message:
+                tokenRes.message ||
+                'Cannot verify outcome: Department is closing for deletion or inactive.',
             },
           };
         }
+
+        outcomeWriterToken = tokenRes.writerId;
+      }
+
+      const serverTime = new Date();
+      let inserted = null;
+      let insertedEventId = null;
+      let reverifiedDoc = null;
+      let reverifyEventId = null;
+      let reverifyVerifiedAt = null;
+
+      try {
+        if (!existing) {
+          // Case A: No existing record -> First verification via upsert with $setOnInsert
+          const eventId = new mongoose.Types.ObjectId();
+          const firstHistoryEntry = {
+            eventId,
+            action: 'verified',
+            oldStatus: null,
+            newStatus: 'verified',
+            changedBy: officerUser._id,
+            changedAt: serverTime,
+            reason: null,
+            ctc: parsedCtc,
+          };
+
+          const createdRecord = await PlacementOutcome.findOneAndUpdate(
+            { application: applicationId },
+            {
+              $setOnInsert: {
+                collegeId,
+                placementDrive: application.placementDrive,
+                application: applicationId,
+                student: application.student,
+                status: 'verified',
+                verifiedBy: officerUser._id,
+                verifiedAt: serverTime,
+                departmentSnapshot,
+                offerPackage: {
+                  ctc: parsedCtc,
+                  unit: 'LPA',
+                  currency: 'INR',
+                },
+                history: [firstHistoryEntry],
+              },
+            },
+            { upsert: true, new: false } // returns null if inserted
+          );
+
+          if (!createdRecord) {
+            // Successfully created first verification
+            inserted = await PlacementOutcome.findOne({ application: applicationId }).populate(
+              'verifiedBy',
+              'name'
+            );
+            insertedEventId = eventId;
+          } else {
+            // Existed concurrently; reload and check
+            existing = createdRecord;
+          }
+        }
+
+        if (existing) {
+          if (existing.status === 'verified') {
+            // Concurrently verified by another worker
+            const populated = await PlacementOutcome.findById(existing._id).populate(
+              'verifiedBy',
+              'name'
+            );
+            return {
+              status: 200,
+              data: formatOutcomeResponse(populated, 'already_verified', false),
+            };
+          }
+
+          if (existing.status === 'revoked') {
+            // Case B: Re-verification of revoked outcome using Compare-and-Set
+            const eventId = new mongoose.Types.ObjectId();
+            const reverifyHistoryEntry = {
+              eventId,
+              action: 'reverified',
+              oldStatus: 'revoked',
+              newStatus: 'verified',
+              changedBy: officerUser._id,
+              changedAt: serverTime,
+              reason: null,
+              ctc: parsedCtc,
+            };
+
+            const updated = await PlacementOutcome.findOneAndUpdate(
+              {
+                _id: existing._id,
+                application: applicationId,
+                collegeId,
+                status: 'revoked', // CAS condition
+              },
+              {
+                $set: {
+                  status: 'verified',
+                  departmentSnapshot, // fresh snapshot on reverification
+                  verifiedBy: officerUser._id,
+                  verifiedAt: serverTime,
+                  offerPackage: {
+                    ctc: parsedCtc,
+                    unit: 'LPA',
+                    currency: 'INR',
+                  },
+                },
+                $push: {
+                  history: reverifyHistoryEntry,
+                },
+              },
+              { new: true }
+            ).populate('verifiedBy', 'name');
+
+            if (updated) {
+              reverifiedDoc = updated;
+              reverifyEventId = eventId;
+              reverifyVerifiedAt = serverTime;
+            } else {
+              // CAS condition failed due to concurrent modification; re-read and retry once
+              const reRead = await PlacementOutcome.findOne({
+                application: applicationId,
+                collegeId,
+              });
+
+              if (!reRead) {
+                return {
+                  status: 404,
+                  error: { code: 'OUTCOME_NOT_FOUND', message: 'Placement outcome not found.' },
+                };
+              }
+
+              if (reRead.status === 'verified') {
+                const currentCtc = reRead.offerPackage ? reRead.offerPackage.ctc : null;
+                if (parsedCtc === null || parsedCtc === currentCtc) {
+                  await DriveApplication.updateOne(
+                    { _id: applicationId, collegeId },
+                    { $set: { outcomeVerified: true } }
+                  );
+                  const populated = await PlacementOutcome.findById(reRead._id).populate(
+                    'verifiedBy',
+                    'name'
+                  );
+                  return {
+                    status: 200,
+                    data: formatOutcomeResponse(populated, 'already_verified', false),
+                  };
+                } else {
+                  return {
+                    status: 409,
+                    error: {
+                      code: 'OUTCOME_PACKAGE_MISMATCH',
+                      message:
+                        'The outcome package CTC does not match the existing verified package. To change package details, revoke the outcome first and then re-verify.',
+                    },
+                  };
+                }
+              }
+
+              // Re-attempt CAS once against revoked status
+              const retryTime = new Date();
+              reverifyHistoryEntry.changedAt = retryTime;
+
+              const retryUpdated = await PlacementOutcome.findOneAndUpdate(
+                {
+                  _id: reRead._id,
+                  application: applicationId,
+                  collegeId,
+                  status: 'revoked',
+                },
+                {
+                  $set: {
+                    status: 'verified',
+                    departmentSnapshot,
+                    verifiedBy: officerUser._id,
+                    verifiedAt: retryTime,
+                    offerPackage: {
+                      ctc: parsedCtc,
+                      unit: 'LPA',
+                      currency: 'INR',
+                    },
+                  },
+                  $push: {
+                    history: reverifyHistoryEntry,
+                  },
+                },
+                { new: true }
+              ).populate('verifiedBy', 'name');
+
+              if (retryUpdated) {
+                reverifiedDoc = retryUpdated;
+                reverifyEventId = eventId;
+                reverifyVerifiedAt = retryTime;
+              } else {
+                // If retry CAS fails, compensate if this request claimed the lock
+                if (claimedLock) {
+                  try {
+                    await DriveApplication.updateOne(
+                      { _id: applicationId, collegeId },
+                      { $set: { outcomeVerified: false } }
+                    );
+                  } catch (compErr) {
+                    console.error('[Lock Compensation Failure]:', compErr.message);
+                  }
+                }
+
+                return {
+                  status: 409,
+                  error: {
+                    code: 'CONCURRENT_MODIFICATION',
+                    message: 'Concurrent update conflict during reverification. Please try again.',
+                  },
+                };
+              }
+            }
+          }
+        }
+      } finally {
+        if (outcomeWriterToken && departmentSnapshot.departmentId) {
+          const relRes = await departmentCoordination.releaseWriterToken({
+            departmentId: departmentSnapshot.departmentId,
+            collegeId,
+            writerId: outcomeWriterToken,
+          });
+          if (!relRes.success) {
+            console.error('[Outcome Token Release Failure]:', {
+              departmentId: departmentSnapshot.departmentId,
+              writerId: outcomeWriterToken,
+              error: relRes,
+            });
+          }
+        }
+      }
+
+      // 5. Post-commit notification dispatch (OUTSIDE token-held section)
+      if (inserted) {
+        let notificationCreated = false;
+        try {
+          const notifRes = await dispatchOutcomeVerifiedNotification({
+            outcomeId: inserted._id,
+            eventId: insertedEventId,
+            studentId: inserted.student,
+            collegeId: inserted.collegeId,
+            placementDriveId: inserted.placementDrive,
+            applicationId,
+            verifiedAt: serverTime,
+          });
+          notificationCreated = !!notifRes.notificationCreated;
+        } catch (postCommitErr) {
+          console.error('[Notification Dispatch Failure]:', {
+            outcomeId: inserted._id ? inserted._id.toString() : null,
+            collegeId: collegeId ? collegeId.toString() : null,
+            type: 'OUTCOME_VERIFIED',
+            errorName: postCommitErr.name || 'Error',
+            errorCode: postCommitErr.code || null,
+            errorMessage: (postCommitErr.message || '').substring(0, 200),
+          });
+        }
+
+        return {
+          status: 200,
+          data: formatOutcomeResponse(inserted, 'created', notificationCreated),
+        };
+      }
+
+      if (reverifiedDoc) {
+        let notificationCreated = false;
+        try {
+          const notifRes = await dispatchOutcomeVerifiedNotification({
+            outcomeId: reverifiedDoc._id,
+            eventId: reverifyEventId,
+            studentId: reverifiedDoc.student,
+            collegeId: reverifiedDoc.collegeId,
+            placementDriveId: reverifiedDoc.placementDrive,
+            applicationId,
+            verifiedAt: reverifyVerifiedAt,
+          });
+          notificationCreated = !!notifRes.notificationCreated;
+        } catch (postCommitErr) {
+          console.error('[Notification Dispatch Failure]:', {
+            outcomeId: reverifiedDoc._id ? reverifiedDoc._id.toString() : null,
+            collegeId: collegeId ? collegeId.toString() : null,
+            type: 'OUTCOME_VERIFIED',
+            errorName: postCommitErr.name || 'Error',
+            errorCode: postCommitErr.code || null,
+            errorMessage: (postCommitErr.message || '').substring(0, 200),
+          });
+        }
+
+        return {
+          status: 200,
+          data: formatOutcomeResponse(reverifiedDoc, 'reverified', notificationCreated),
+        };
       }
     } catch (outcomeErr) {
       // If this request claimed the lock and outcome step failed, compensate by clearing flag

@@ -14,10 +14,29 @@ import {
   Calendar,
   Filter,
   ClipboardCheck,
+  CheckCircle2,
 } from 'lucide-react';
 import CompanyLocation from '../common/CompanyLocation';
 
 const ALLOWED_STATUSES = ['Applied', 'Shortlisted', 'Interviewing', 'Selected', 'Rejected'];
+
+const formatAcademicYear = (year) => {
+  if (!year || typeof year !== 'string' || !year.trim()) return 'N/A';
+  const trimmed = year.trim();
+  if (/year$/i.test(trimmed)) return trimmed;
+  return `${trimmed} Year`;
+};
+
+const formatAppliedDate = (dateString) => {
+  if (!dateString) return 'Date unavailable';
+  const parsed = new Date(dateString);
+  if (isNaN(parsed.getTime())) return 'Date unavailable';
+  return parsed.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+};
 
 const getStatusBadgeClass = (status) => {
   switch (status) {
@@ -132,6 +151,8 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
       const roll = app.academicProfile?.rollNumber || '';
       const dept = app.academicProfile?.department || '';
       const course = app.academicProfile?.course || '';
+      const section = app.academicProfile?.section || '';
+      const academicYear = app.academicProfile?.academicYear || '';
       const skills = (app.academicProfile?.skills || []).join(' ');
 
       const query = searchTerm.toLowerCase();
@@ -142,6 +163,8 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
         roll.toLowerCase().includes(query) ||
         dept.toLowerCase().includes(query) ||
         course.toLowerCase().includes(query) ||
+        section.toLowerCase().includes(query) ||
+        academicYear.toLowerCase().includes(query) ||
         skills.toLowerCase().includes(query);
 
       const matchesStatus = statusFilter === 'ALL' || app.status === statusFilter;
@@ -237,7 +260,7 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by student name, roll no, department, or skill..."
+              placeholder="Search by student name, roll no, department, section, or skill..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 outline-none"
@@ -317,46 +340,76 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                 return (
                   <div
                     key={app._id}
-                    className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 shadow-xs transition"
+                    className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs transition"
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                       {/* Left: Student Identity & Academic Profile */}
-                      <div className="flex-1 space-y-2">
+                      <div className="flex-1 min-w-0 space-y-2.5">
+                        {/* 1. Student Identity */}
                         <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-sm font-bold text-slate-900">
+                          <h4 className="text-sm sm:text-base font-bold text-slate-900 truncate">
                             {app.student?.name || 'Student Candidate'}
                           </h4>
                           {profile.rollNumber && (
-                            <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-mono font-medium border border-slate-200">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-mono font-medium border border-slate-200 shrink-0">
                               {profile.rollNumber}
                             </span>
                           )}
-                          <span className="text-xs text-slate-500">{app.student?.email}</span>
+                          {app.student?.email && (
+                            <span className="text-xs text-slate-500 truncate">{app.student.email}</span>
+                          )}
                         </div>
 
-                        {/* Academic details */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                          <div className="flex items-center gap-1">
-                            <GraduationCap className="w-3.5 h-3.5 text-slate-400" />
-                            <span>
-                              {profile.department || 'Dept N/A'}
-                              {profile.course ? ` • ${profile.course}` : ''}
-                              {profile.batch ? ` (${profile.batch})` : ''}
+                        {/* 2. Academic Information: Department, Section, Academic Year, Course/Batch */}
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {/* Department */}
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700">
+                            <GraduationCap className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-medium text-slate-500">Dept:</span>
+                            <span className="font-semibold text-slate-800">
+                              {profile.department || 'N/A'}
+                            </span>
+                            {profile.course && <span className="text-slate-400">• {profile.course}</span>}
+                            {profile.batch && <span className="text-slate-400">({profile.batch})</span>}
+                          </div>
+
+                          {/* Section */}
+                          <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700">
+                            <span className="font-medium text-slate-500">Section:</span>
+                            <span className="font-semibold text-slate-800 font-mono">
+                              {profile.section || 'N/A'}
                             </span>
                           </div>
-                          <div>
-                            <span className="text-slate-400">CGPA:</span>{' '}
+
+                          {/* Academic Year */}
+                          <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700">
+                            <span className="font-medium text-slate-500">Academic Year:</span>
                             <span className="font-semibold text-slate-800">
+                              {formatAcademicYear(profile.academicYear)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 3 & 4. Academic Performance & Application Info */}
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-slate-600 pt-0.5">
+                          {/* Current CGPA */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-500 font-medium">Current CGPA:</span>
+                            <span className="font-bold text-slate-900 bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2 py-0.5 rounded-md">
                               {profile.cgpa !== null && profile.cgpa !== undefined
                                 ? profile.cgpa
                                 : 'N/A'}
                             </span>
                           </div>
-                          <div>
-                            <span className="text-slate-400">Backlogs:</span>{' '}
+
+                          {/* Backlogs */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-500 font-medium">Backlogs:</span>
                             <span
-                              className={`font-semibold ${
-                                profile.backlogs > 0 ? 'text-rose-600' : 'text-slate-800'
+                              className={`font-semibold px-1.5 py-0.5 rounded ${
+                                profile.backlogs > 0
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  : 'text-slate-800'
                               }`}
                             >
                               {profile.backlogs !== null && profile.backlogs !== undefined
@@ -364,23 +417,21 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                                 : '0'}
                             </span>
                           </div>
-                          {app.appliedAt && (
-                            <div>
-                              <span className="text-slate-400">Applied:</span>{' '}
-                              <span>
-                                {new Date(app.appliedAt).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </span>
-                            </div>
-                          )}
+
+                          {/* Applied On */}
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="text-slate-500 font-medium">Applied On:</span>
+                            <span className="text-slate-800 font-medium">
+                              {formatAppliedDate(app.appliedAt)}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Skills */}
                         {profile.skills && profile.skills.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                            <span className="text-[11px] text-slate-400">Skills:</span>
+                            <span className="text-[11px] text-slate-400 font-medium">Skills:</span>
                             {profile.skills.map((skill, idx) => (
                               <span
                                 key={idx}
@@ -394,15 +445,15 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                       </div>
 
                       {/* Right: Resume Link & Status Management Dropdown */}
-                      <div className="flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-center gap-3 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-                        {/* Resume Link */}
+                      <div className="flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-3 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100 shrink-0">
+                        {/* 5. Resume Action */}
                         <div>
                           {profile.resumeUrl ? (
                             <a
                               href={profile.resumeUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200/80 transition cursor-pointer"
                               title="Open student resume in new tab"
                             >
                               <FileText className="w-3.5 h-3.5 text-slate-500" />
@@ -410,11 +461,11 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                               <ExternalLink className="w-3 h-3 text-slate-400" />
                             </a>
                           ) : (
-                            <span className="text-[11px] text-slate-400 italic">No resume attached</span>
+                            <span className="text-xs text-slate-400 italic">No resume attached</span>
                           )}
                         </div>
 
-                        {/* Status selector */}
+                        {/* 6. Status selector & outcome verification */}
                         <div className="flex items-center gap-2">
                           {isRowUpdating ? (
                             <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 bg-slate-50 rounded-lg border border-slate-200">
@@ -424,7 +475,10 @@ const DriveApplicantsModal = ({ isOpen, onClose, drive, onStatusUpdated }) => {
                           ) : (
                             <div className="flex items-center gap-1.5 flex-wrap justify-end">
                               {app.outcomeVerified && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200" title="Placement outcome confirmed">
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  title="Placement outcome confirmed"
+                                >
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                   <span>Verified</span>
                                 </span>
